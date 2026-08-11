@@ -1,0 +1,148 @@
+'use client'
+
+import { Lock } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { useActionState, useEffect, useReducer, useRef } from 'react'
+
+import { BottomActionBar, Button, Countdown, PlayerSelect, useToast } from '@/components/ui'
+import { cn } from '@/lib/cn'
+import type { PredictEditorVM } from '@/lib/view-models'
+
+import { savePredictionAction, type SaveState } from './actions'
+import { draftReducer } from './reducer'
+import { ScorePicker } from './score-picker'
+
+const INITIAL_SAVE: SaveState = { ok: false, error: null }
+
+export interface PredictionFormProps {
+  editor: PredictEditorVM
+}
+
+/**
+ * Dueno del borrador (D6): un useReducer sembrado por props desde el Server
+ * Component. Nada se persiste hasta enviar el formulario.
+ */
+export function PredictionForm({ editor }: PredictionFormProps) {
+  const { match, squads, suggestions, initialDraft, scoring } = editor
+
+  const [draft, dispatch] = useReducer(draftReducer, initialDraft)
+  const [state, formAction, pending] = useActionState(savePredictionAction, INITIAL_SAVE)
+  const router = useRouter()
+  const toast = useToast()
+
+  // useActionState devuelve un objeto nuevo por envio: comparar la identidad
+  // basta para reaccionar una sola vez a cada respuesta.
+  const handled = useRef<SaveState>(INITIAL_SAVE)
+  useEffect(() => {
+    if (state === handled.current) return
+    handled.current = state
+
+    if (state.ok) {
+      toast('Pronóstico guardado y sellado')
+      router.push('/jornada')
+      return
+    }
+    if (state.error) {
+      toast(state.error, 'bad')
+      // Si el rechazo es porque el partido se cerro entre medias, al refrescar
+      // el servidor vuelve a decidir y la pantalla cae en <SealedCard> (4b).
+      router.refresh()
+    }
+  }, [state, router, toast])
+
+  const noGoalsLabel = draft.noGoals ? 'Sin goles · nadie marca ni asiste' : 'Marcar «sin goles»'
+
+  return (
+    <form action={formAction}>
+      <input type="hidden" name="matchId" value={match.id} />
+      <input type="hidden" name="home" value={draft.home} />
+      <input type="hidden" name="away" value={draft.away} />
+      <input type="hidden" name="mvp" value={draft.mvp ?? ''} />
+      <input type="hidden" name="scorers" value={JSON.stringify(draft.scorers)} />
+      <input type="hidden" name="assists" value={JSON.stringify(draft.assists)} />
+      <input type="hidden" name="noGoals" value={draft.noGoals ? '1' : ''} />
+
+      {/* El padding inferior reserva el hueco de la barra fija: sin el, la
+          tarjeta del aviso queda debajo del boton de guardar. */}
+      <div className="flex flex-col gap-[14px] px-[14px] pt-[16px] pb-[calc(env(safe-area-inset-bottom)+132px)]">
+        <ScorePicker
+          home={match.home}
+          away={match.away}
+          homeGoals={draft.home}
+          awayGoals={draft.away}
+          onGoals={(side, value) => dispatch({ type: 'setGoals', side, value })}
+          onQuickScore={(home, away) => dispatch({ type: 'setScore', home, away })}
+        />
+
+        <PlayerSelect
+          label="MVP del partido"
+          hint={`+${scoring.mvp} pts`}
+          squads={squads}
+          suggestions={suggestions}
+          selected={draft.mvp ? [draft.mvp] : []}
+          multiple={false}
+          emptyLabel="Elegir jugador"
+          onToggle={(player) => dispatch({ type: 'toggleMvp', player })}
+        />
+
+        <PlayerSelect
+          label="Goleadores"
+          hint={`+${scoring.scorer} pts por acierto`}
+          squads={squads}
+          suggestions={suggestions}
+          selected={draft.scorers}
+          multiple
+          emptyLabel="Elegir goleadores"
+          onToggle={(player) => dispatch({ type: 'toggleScorer', player })}
+        >
+          <button
+            type="button"
+            aria-pressed={draft.noGoals}
+            onClick={() => dispatch({ type: 'toggleNoGoals' })}
+            className={cn(
+              'mt-[11px] flex min-h-[46px] w-full items-center justify-center gap-[8px]',
+              'rounded-[13px] border px-[14px] text-[14px] font-bold',
+              'transition-transform duration-100 active:scale-[.97] active:opacity-90',
+              draft.noGoals
+                ? 'border-accent bg-accent-soft text-accent2'
+                : 'border-line2 bg-transparent text-txt2',
+            )}
+          >
+            {noGoalsLabel}
+          </button>
+        </PlayerSelect>
+
+        <PlayerSelect
+          label="Asistentes"
+          hint={`+${scoring.assist} pts por acierto`}
+          squads={squads}
+          suggestions={suggestions}
+          selected={draft.assists}
+          multiple
+          emptyLabel="Elegir asistentes"
+          onToggle={(player) => dispatch({ type: 'toggleAssist', player })}
+        />
+
+        <div className="flex gap-[9px] rounded-[16px] border border-line bg-accent-soft px-[14px] py-[12px]">
+          <Lock size={16} strokeWidth={2.1} aria-hidden className="mt-[1px] flex-none text-accent2" />
+          <p className="text-[12.5px] font-semibold leading-[1.45] text-txt2">
+            Se sella al pitido inicial. Hasta entonces puedes cambiarlo las veces que quieras y{' '}
+            <b className="font-extrabold text-txt">nadie lo ve</b>.
+          </p>
+        </div>
+      </div>
+
+      <BottomActionBar>
+        <div className="min-w-0 flex-1">
+          <p className="text-[10.5px] font-extrabold uppercase tracking-[.08em] text-txt3">
+            Cierra en
+          </p>
+          <Countdown deadlineAt={match.kickoffAt} className="text-[19px] leading-[1.15]" />
+        </div>
+        <Button type="submit" variant="primary" loading={pending} className="flex-none px-[26px]">
+          {match.myPrediction ? 'Actualizar' : 'Guardar'}
+        </Button>
+      </BottomActionBar>
+    </form>
+  )
+}

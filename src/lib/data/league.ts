@@ -1,0 +1,453 @@
+/**
+ * Contexto de peticion, consultas base de la peña y los dos VM de ajustes.
+ *
+ * POR QUE ESTE FICHERO TIENE MAS DE LO QUE SU NOMBRE PROMETE
+ * Las cuatro modulos de datos (`gameweek`, `standings`, `profile`, `squads`)
+ * necesitan lo mismo antes de poder consultar nada: quien soy, en que peña
+ * estoy, que puntuacion rige y en que instante se pinta todo. Ese contexto vive
+ * aqui, y aqui viven tambien las consultas base (jornadas, partidos, plantillas)
+ * porque `league.ts` es el unico modulo del que pueden colgar todos los demas
+ * SIN crear un import circular: nada de aqui importa a los otros cuatro.
+ *
+ * LAS DOS FUENTES
+ * Con Supabase configurado se consulta de verdad; sin el (`isSupabaseConfigured`
+ * a false) cada funcion publica cae en `mock.ts` y la app arranca igual sin una
+ * sola variable de entorno. La eleccion se toma UNA vez, en `getDataContext()`:
+ * si devuelve `null` es que no hay backend y toca mock.
+ *
+ * SESION SIN PEÑA
+ * Con Supabase configurado pero sin sesion (o con sesion que no es de ningun
+ * miembro) NO se cae al mock: eso pintaria datos inventados a alguien que no ha
+ * entrado. Se lanza `NoMemberError` y que la pantalla lo trate. La guarda de
+ * verdad (redirigir a /login) es cosa de `requireMember()`, no de la capa de
+ * datos.
+ *
+ * Riesgo Supabase: `getClaims()`, JAMAS `getSession()` en servidor.
+ */
+
+import { cache } from 'react'
+
+import { TEAMS } from '../laliga'
+import { createClient, isSupabaseConfigured } from '../supabase/server'
+import { DEFAULT_SCORING } from '../types'
+import type { MatchResult, MatchStatus, Scoring, TeamCode } from '../types'
+import type { AdminMatchVM, AdminSquadVM, LeagueSettingsVM, TeamVM } from '../view-models'
+import { mockGetAdminMatches, mockGetLeagueSettings } from './mock'
+
+/* ------------------------------------------------------------------ *
+ * 1. Contexto de la peticion
+ * ------------------------------------------------------------------ */
+
+/**
+ * Hay backend, pero quien pregunta no puede ver datos.
+ *
+ * `reason` separa los dos casos porque la salida NO es la misma: sin sesion se
+ * va a /login a pedir el enlace magico; con sesion pero sin ficha de miembro se
+ * va a /onboarding a meter el codigo de la peña. Mandar a /login a quien ya ha
+ * entrado lo dejaria en bucle.
+ */
+export type NoMemberReason = 'no-session' | 'no-member'
+
+export class NoMemberError extends Error {
+  readonly reason: NoMemberReason
+
+  constructor(message: string, reason: NoMemberReason) {
+    super(message)
+    this.name = 'NoMemberError'
+    this.reason = reason
+  }
+}
+
+export type MemberInfo = {
+  memberId: string
+  userId: string
+  displayName: string
+  avatarColor: string
+}
+
+export type DataContext = {
+  supabase: Awaited<ReturnType<typeof createClient>>
+  userId: string
+  memberId: string
+  leagueId: string
+  leagueName: string
+  inviteCode: string
+  displayName: string
+  avatarColor: string
+  isAdmin: boolean
+  scoring: Scoring
+  /** Los miembros de MI peña, por orden de alta. RLS ya recorta a mi liga. */
+  members: MemberInfo[]
+  /**
+   * Instante unico para toda la peticion. Sin esto dos consultas de la misma
+   * pantalla podrian caer a distinto lado del pitido inicial y la jornada
+   * saldria incoherente consigo misma.
+   */
+  now: number
+}
+
+type LeagueEmbed = {
+  id: string
+  name: string
+  invite_code: string
+  scoring: unknown
+  admin_user_id: string
+}
+
+type MemberRow = {
+  id: string
+  user_id: string
+  league_id: string
+  display_name: string
+  avatar_color: string
+  leagues: LeagueEmbed
+}
+
+/** `leagues.scoring` es jsonb: puede venir con claves de menos o basura. */
+function scoringOf(raw: unknown): Scoring {
+  const src = (raw ?? {}) as Record<string, unknown>
+  const value = (key: keyof Scoring) => {
+    const n = src[key]
+    return typeof n === 'number' && Number.isFinite(n) ? n : DEFAULT_SCORING[key]
+  }
+  return {
+    exact: value('exact'),
+    x2: value('x2'),
+    mvp: value('mvp'),
+    scorer: value('scorer'),
+    // Una liga creada antes de 0011 no tiene la clave: cae al defecto (1 punto).
+    assist: value('assist'),
+    pleno: value('pleno'),
+  }
+}
+
+/**
+ * `null` = no hay Supabase configurado, hay que tirar de mock.
+ * Lanza `NoMemberError` si hay backend pero no hay sesion o no hay ficha.
+ *
+ * `cache()` lo memoiza por peticion: las nueve funciones de datos comparten una
+ * sola consulta de contexto y, sobre todo, el mismo `now`.
+ */
+export const getDataContext = cache(async (): Promise<DataContext | null> => {
+  if (!isSupabaseConfigured) return null
+
+  const supabase = await createClient()
+  const { data: claims } = await supabase.auth.getClaims()
+  const userId = claims?.claims?.sub
+  if (!userId) throw new NoMemberError('No hay sesión iniciada.', 'no-session')
+
+  // RLS ya limita `members` a las peñas del usuario, asi que esta consulta trae
+  // a los 12 de la peña y no hace falta filtrar por liga a mano.
+  const { data, error } = await supabase
+    .from('members')
+    .select(
+      'id, user_id, league_id, display_name, avatar_color, ' +
+        'leagues!inner(id, name, invite_code, scoring, admin_user_id)',
+    )
+    .order('joined_at', { ascending: true })
+  if (error) throw error
+
+  const rows = (data ?? []) as unknown as MemberRow[]
+  const mine = rows.find((row) => row.user_id === userId)
+  if (!mine) throw new NoMemberError('Tu cuenta todavía no pertenece a ninguna peña.', 'no-member')
+
+  const league = mine.leagues
+
+  return {
+    supabase,
+    userId,
+    memberId: mine.id,
+    leagueId: mine.league_id,
+    leagueName: league.name,
+    inviteCode: league.invite_code,
+    displayName: mine.display_name,
+    avatarColor: mine.avatar_color,
+    isAdmin: league.admin_user_id === userId,
+    scoring: scoringOf(league.scoring),
+    members: rows
+      .filter((row) => row.league_id === mine.league_id)
+      .map((row) => ({
+        memberId: row.id,
+        userId: row.user_id,
+        displayName: row.display_name,
+        avatarColor: row.avatar_color,
+      })),
+    now: Date.now(),
+  }
+})
+
+/* ------------------------------------------------------------------ *
+ * 2. Consultas base: jornadas, partidos y plantillas
+ * ------------------------------------------------------------------ */
+
+export type GameweekRow = { id: string; number: number; opens_at: string }
+
+export type MatchRow = {
+  id: string
+  gameweek_id: string
+  home_code: TeamCode
+  away_code: TeamCode
+  kickoff_at: string
+  kickoff_provisional: boolean
+  status: MatchStatus
+  real_home: number | null
+  real_away: number | null
+  real_mvp: string | null
+  real_scorers: string[] | null
+  real_assists: string[] | null
+  position: number
+}
+
+// `real_assists` va SIEMPRE en el select. Si falta, `resultOf` monta un
+// MatchResult sin `assists` y el primer `.map()` de la pantalla revienta.
+const MATCH_COLUMNS =
+  'id, gameweek_id, home_code, away_code, kickoff_at, kickoff_provisional, ' +
+  'status, real_home, real_away, real_mvp, real_scorers, real_assists, position'
+
+export const getLeagueGameweeks = cache(async (): Promise<GameweekRow[]> => {
+  const ctx = await getDataContext()
+  if (!ctx) return []
+
+  const { data, error } = await ctx.supabase
+    .from('gameweeks')
+    .select('id, number, opens_at')
+    .eq('league_id', ctx.leagueId)
+    .order('number', { ascending: true })
+  if (error) throw error
+
+  return (data ?? []) as unknown as GameweekRow[]
+})
+
+/**
+ * Los partidos de una jornada, ORDENADOS POR HORA y no por `position`.
+ * `position` es el orden del sorteo, y con los aplazamientos del Mundial deja de
+ * coincidir con el orden en que se juegan: la jornada 1 empieza por Alavés–Getafe
+ * (15 de agosto) y acaba en Barcelona–Athletic (27), que salio tercero en el
+ * sorteo. La lista de la pantalla se lee por fecha.
+ */
+export async function fetchMatchRows(ctx: DataContext, gameweekId: string): Promise<MatchRow[]> {
+  const { data, error } = await ctx.supabase
+    .from('matches')
+    .select(MATCH_COLUMNS)
+    .eq('gameweek_id', gameweekId)
+    .order('kickoff_at', { ascending: true })
+    .order('position', { ascending: true })
+  if (error) throw error
+
+  return (data ?? []) as unknown as MatchRow[]
+}
+
+/** Un partido suelto. `null` si no existe o si RLS no lo deja ver. */
+export async function fetchMatchRow(ctx: DataContext, matchId: string): Promise<MatchRow | null> {
+  // Un id que no es uuid (por ejemplo el `2026-27-J01-M03` del mock) haria que
+  // Postgres devolviera un error de sintaxis en vez de "no existe". La pantalla
+  // espera `null` para hacer notFound(), asi que se filtra antes de preguntar.
+  if (!isUuid(matchId)) return null
+
+  const { data, error } = await ctx.supabase
+    .from('matches')
+    .select(MATCH_COLUMNS)
+    .eq('id', matchId)
+    .maybeSingle()
+  if (error) throw error
+
+  return (data ?? null) as unknown as MatchRow | null
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+export function isUuid(value: string): boolean {
+  return UUID_RE.test(value)
+}
+
+/** La jornada activa: la primera POR NUMERO que aun tiene algun partido por empezar. */
+export const resolveActiveGameweek = cache(async (): Promise<GameweekRow | null> => {
+  const ctx = await getDataContext()
+  if (!ctx) return null
+
+  const gameweeks = await getLeagueGameweeks()
+  if (gameweeks.length === 0) return null
+
+  const { data, error } = await ctx.supabase
+    .from('matches')
+    .select('gameweek_id, gameweeks!inner(league_id)')
+    .eq('gameweeks.league_id', ctx.leagueId)
+    .gt('kickoff_at', new Date(ctx.now).toISOString())
+  if (error) throw error
+
+  const pending = new Set(
+    ((data ?? []) as unknown as Array<{ gameweek_id: string }>).map((row) => row.gameweek_id),
+  )
+
+  // Ojo al orden: NO vale "la jornada del proximo partido por hora". La jornada 1
+  // acaba el 27 de agosto y la 2 empieza el 20: a fecha 21 el proximo partido es
+  // de la 2, pero la 1 sigue admitiendo pronosticos y es la que manda.
+  return gameweeks.find((gw) => pending.has(gw.id)) ?? gameweeks[gameweeks.length - 1]
+})
+
+/** Ids de jornada con al menos un partido jugado. Base de "temporada en curso". */
+export const getPlayedGameweekIds = cache(async (): Promise<Set<string>> => {
+  const ctx = await getDataContext()
+  if (!ctx) return new Set()
+
+  const { data, error } = await ctx.supabase
+    .from('matches')
+    .select('gameweek_id, gameweeks!inner(league_id)')
+    .eq('gameweeks.league_id', ctx.leagueId)
+    .eq('status', 'played')
+  if (error) throw error
+
+  return new Set(
+    ((data ?? []) as unknown as Array<{ gameweek_id: string }>).map((row) => row.gameweek_id),
+  )
+})
+
+/** Plantillas de la peña, por codigo de equipo. Un equipo sin fila no es un error. */
+export const getLeagueSquads = cache(async (): Promise<Map<TeamCode, string[]>> => {
+  const ctx = await getDataContext()
+  if (!ctx) return new Map()
+
+  const { data, error } = await ctx.supabase
+    .from('team_squads')
+    .select('team_code, players')
+    .eq('league_id', ctx.leagueId)
+  if (error) throw error
+
+  const rows = (data ?? []) as unknown as Array<{ team_code: TeamCode; players: string[] | null }>
+  return new Map(rows.map((row) => [row.team_code, row.players ?? []]))
+})
+
+/**
+ * Lo mismo que `getLeagueSquads` pero SIN tirar el `source`, que es lo unico
+ * que distingue "De la API" de "Corregida a mano" en el panel de organizador.
+ * Solo la usa `/ajustes/admin`; las pantallas de la peña solo quieren nombres.
+ */
+export const getAdminSquads = cache(async (): Promise<AdminSquadVM[]> => {
+  const ctx = await getDataContext()
+  if (!ctx) return []
+
+  const { data, error } = await ctx.supabase
+    .from('team_squads')
+    .select('team_code, players, source')
+    .eq('league_id', ctx.leagueId)
+  if (error) throw error
+
+  const rows = (data ?? []) as unknown as Array<{
+    team_code: TeamCode
+    players: string[] | null
+    source: string
+  }>
+
+  return rows.map((row) => ({
+    code: row.team_code,
+    players: row.players ?? [],
+    // El check de la tabla ya solo admite 'api' | 'admin'; el ternario existe
+    // para estrechar el tipo, no porque pueda llegar otra cosa.
+    source: row.source === 'admin' ? 'admin' : 'api',
+  }))
+})
+
+/* ------------------------------------------------------------------ *
+ * 3. Helpers de partido compartidos
+ * ------------------------------------------------------------------ */
+
+/**
+ * El estado que se pinta.
+ *
+ * `matches.status` esta materializado y lo mueve la ingesta o el admin, asi que
+ * puede ir por detras del reloj: un partido sigue en 'open' hasta que alguien
+ * llama a `refresh_match_statuses()`. RLS, en cambio, cuelga SOLO de
+ * `kickoff_at`, y ya ha sellado el pronostico. Ensenar 'open' ahi seria mentir e
+ * invitar a un guardado que la base va a rechazar, asi que pasado el pitido
+ * inicial se degrada a 'locked'.
+ *
+ * 'live' y 'played' no se tocan: esos SI son informacion que solo tiene la
+ * ingesta y que el reloj no puede deducir.
+ */
+export function effectiveStatus(row: MatchRow, now: number): MatchStatus {
+  if (row.status === 'live' || row.status === 'played') return row.status
+  return Date.parse(row.kickoff_at) > now ? 'open' : 'locked'
+}
+
+/** Resultado real, o `null` si el partido no esta jugado. */
+export function resultOf(row: MatchRow, now: number): MatchResult | null {
+  if (effectiveStatus(row, now) !== 'played') return null
+  if (row.real_home === null || row.real_away === null) return null
+  return {
+    home: row.real_home,
+    away: row.real_away,
+    // El MVP lo mete el organizador DESPUES del partido: que falte es lo normal
+    // recien acabado, no un error. La UI lo pinta como "Falta el MVP".
+    mvp: row.real_mvp ?? '',
+    scorers: row.real_scorers ?? [],
+    // Igual que los goleadores: los mete el organizador y pueden faltar. Lista
+    // aparte, no pareja de cada gol.
+    assists: row.real_assists ?? [],
+  }
+}
+
+/**
+ * Ficha visual del equipo. Un codigo que no este en `TEAMS` (un ascendido que
+ * aun no se ha añadido a laliga.ts, por ejemplo) NO revienta la pantalla: se
+ * pinta con sus siglas y un gris neutro, y se ve a la legua que falta el dato.
+ */
+export function teamVM(code: TeamCode): TeamVM {
+  const team = TEAMS[code]
+  if (!team) return { code, name: code, color: '#2A2F3A', ink: '#FFFFFF' }
+  return { code, name: team.name, color: team.color, ink: team.ink }
+}
+
+/** 'Sevilla – Valencia' (guion largo con espacios, como el prototipo). */
+export function matchLabel(row: MatchRow): string {
+  return `${teamVM(row.home_code).name} – ${teamVM(row.away_code).name}`
+}
+
+/** PostgREST devuelve `+00:00`; el VM promete ISO 8601 en UTC con `Z`. */
+export function isoUtc(timestamp: string): string {
+  return new Date(timestamp).toISOString()
+}
+
+/* ------------------------------------------------------------------ *
+ * 4. Las dos funciones publicas de este modulo
+ * ------------------------------------------------------------------ */
+
+export async function getLeagueSettings(): Promise<LeagueSettingsVM> {
+  const ctx = await getDataContext()
+  if (!ctx) return mockGetLeagueSettings()
+
+  return {
+    leagueName: ctx.leagueName,
+    inviteCode: ctx.inviteCode,
+    memberCount: ctx.members.length,
+    isAdmin: ctx.isAdmin,
+    scoring: ctx.scoring,
+    displayName: ctx.displayName,
+    avatarColor: ctx.avatarColor,
+  }
+}
+
+export async function getAdminMatches(): Promise<AdminMatchVM[]> {
+  const ctx = await getDataContext()
+  if (!ctx) return mockGetAdminMatches()
+
+  const active = await resolveActiveGameweek()
+  if (!active) return []
+
+  const [rows, squads] = await Promise.all([
+    fetchMatchRows(ctx, active.id),
+    getLeagueSquads(),
+  ])
+
+  return rows.map((row) => {
+    const status = effectiveStatus(row, ctx.now)
+    const result = resultOf(row, ctx.now)
+    return {
+      id: row.id,
+      label: matchLabel(row),
+      status,
+      result,
+      missingMvp: status === 'played' && !result?.mvp,
+      players: [...(squads.get(row.home_code) ?? []), ...(squads.get(row.away_code) ?? [])],
+    }
+  })
+}

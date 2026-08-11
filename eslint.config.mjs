@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Scratch del CLI de Supabase: `npx supabase start` deja ahi el bundle
+    // minificado del edge runtime, y eslint lo analizaba como codigo del
+    // proyecto (154 errores de `prefer-const` sobre variables de una letra).
+    "supabase/.temp/**",
   ]),
 ]);
 
