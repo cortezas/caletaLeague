@@ -1,0 +1,63 @@
+# Cron de La Caleta League.
+#
+# POR QUE AQUI Y NO SOLO EN VERCEL
+# El plan Hobby de Vercel permite un unico cron y como mucho una vez al dia.
+# Eso vale para traerse los resultados, pero no para los avisos: el aviso es
+# "una hora antes del cierre", y con una pasada diaria la mitad de la peña se
+# entera cuando el partido ya ha empezado. GitHub Actions no tiene esa limitacion.
+#
+# El cron de Vercel (vercel.json) se queda como red de seguridad: si esto se
+# cae o alguien lo desactiva, los resultados siguen entrando una vez al dia.
+#
+# HACE FALTA UN SECRETO EN EL REPOSITORIO
+#   Settings > Secrets and variables > Actions > New repository secret
+#   Nombre: CRON_SECRET
+#   Valor:  el mismo que tiene la variable CRON_SECRET en Vercel
+# Sin el, los dos pasos fallan con 401 y se ve en la pestaña Actions.
+
+name: Cron
+
+on:
+  schedule:
+    # Avisos: cada 15 minutos. GitHub no garantiza puntualidad al minuto y
+    # puede retrasarse en horas de mucha carga; es aceptable para un aviso con
+    # una hora de antelacion. No lo seria para sellar pronosticos, pero de eso
+    # se encarga la base de datos con kickoff_at, no un cron.
+    - cron: '*/15 * * * *'
+    # Ingesta: una vez por hora. El calendario no cambia cada cuarto de hora y
+    # la API gratuita solo admite 10 peticiones por minuto.
+    - cron: '7 * * * *'
+  # Para poder lanzarlo a mano desde la pestaña Actions.
+  workflow_dispatch:
+
+# Si una pasada se alarga, que no se solapen dos.
+concurrency:
+  group: cron
+  cancel-in-progress: false
+
+jobs:
+  cron:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      BASE: https://caleta-league.vercel.app
+    steps:
+      - name: Avisos antes del cierre
+        run: |
+          code=$(curl -sS -o /tmp/push.json -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            --max-time 60 "$BASE/api/push/dispatch")
+          echo "HTTP $code"; cat /tmp/push.json || true; echo
+          # 503 = sin claves VAPID configuradas. No es un fallo del cron.
+          if [ "$code" != "200" ] && [ "$code" != "503" ]; then exit 1; fi
+
+      - name: Ingesta de partidos y resultados
+        # Solo en la pasada horaria (o a mano). En las de cada 15 minutos este
+        # paso se salta: seria gastar cuota de la API para nada.
+        if: ${{ github.event.schedule == '7 * * * *' || github.event_name == 'workflow_dispatch' }}
+        run: |
+          code=$(curl -sS -o /tmp/sync.json -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            --max-time 120 "$BASE/api/sync")
+          echo "HTTP $code"; head -c 600 /tmp/sync.json || true; echo
+          [ "$code" = "200" ]
