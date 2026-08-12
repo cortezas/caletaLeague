@@ -1,22 +1,51 @@
 import { CalendarDays } from 'lucide-react'
 import type { Metadata } from 'next'
 import Link from 'next/link'
+import { notFound } from 'next/navigation'
 
 import { EmptyState, ProgressBar } from '@/components/ui'
 import { GameweekHeader, SecretBanner } from '@/features/jornada/gameweek-header'
 import { MatchRow } from '@/features/jornada/match-row'
 import { requireMember } from '@/lib/auth'
-import { getActiveGameweek } from '@/lib/data'
+import { getActiveGameweek, getGameweek } from '@/lib/data'
+import type { GameweekVM } from '@/lib/view-models'
 
 export const metadata: Metadata = {
   title: 'Jornada · La Caleta League',
 }
 
-export default async function JornadaPage() {
+/**
+ * D2: `searchParams` es una promesa y se resuelve con await.
+ *
+ * `?j=<numero>` fija la jornada que se mira. Sin parametro se entra en la del
+ * cierre mas proximo, que con los aplazamientos del Mundial no es la de menor
+ * numero: la jornada 2 se juega DENTRO de la 1.
+ */
+export default async function JornadaPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ j?: string | string[] }>
+}) {
   // D13: la guarda de pertenencia va al principio de cada pantalla protegida.
   // Sin ella, quien no ha entrado se comia el error boundary en vez del login.
   await requireMember()
-  const gameweek = await getActiveGameweek()
+
+  const { j } = await searchParams
+  const requested = Array.isArray(j) ? j[0] : j
+
+  let gameweek: GameweekVM
+  if (requested === undefined || requested === '') {
+    gameweek = await getActiveGameweek()
+  } else {
+    const jornada = Number(requested)
+    if (!Number.isInteger(jornada) || jornada < 1) notFound()
+    const found = await getGameweek(jornada)
+    if (!found) notFound()
+    gameweek = found
+  }
+
+  const summaryHref =
+    gameweek.number > 0 ? `/jornada/resumen?j=${gameweek.number}` : '/jornada/resumen'
 
   if (gameweek.totalCount === 0) {
     return (
@@ -58,7 +87,7 @@ export default async function JornadaPage() {
           </div>
 
           <Link
-            href="/jornada/resumen"
+            href={summaryHref}
             className="mt-[5px] flex min-h-[52px] w-full items-center justify-center rounded-[16px] border border-dashed border-line2 text-[14px] font-bold text-txt2 transition-transform duration-100 active:scale-[.97] active:opacity-90"
           >
             Repasar la jornada antes de cerrar

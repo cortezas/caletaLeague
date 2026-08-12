@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
+import { notFound } from 'next/navigation'
 
 import { ScreenHeader, StatCard } from '@/components/ui'
 import { SummaryRow } from '@/features/jornada/summary-row'
@@ -10,24 +11,50 @@ export const metadata: Metadata = {
   title: 'Repaso de la jornada · La Caleta League',
 }
 
-export default async function ResumenPage() {
+/**
+ * D2: `searchParams` es una promesa y se resuelve con await.
+ * `?j=<numero>` es la misma jornada que se estaba mirando en /jornada.
+ */
+export default async function ResumenPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ j?: string | string[] }>
+}) {
   // D13: la guarda de pertenencia va al principio de cada pantalla protegida.
   await requireMember()
-  const summary = await getGameweekSummary()
+
+  const { j } = await searchParams
+  const requested = Array.isArray(j) ? j[0] : j
+
+  let jornada: number | null = null
+  if (requested !== undefined && requested !== '') {
+    const parsed = Number(requested)
+    if (!Number.isInteger(parsed) || parsed < 1) notFound()
+    jornada = parsed
+  }
+
+  const summary = jornada === null ? await getGameweekSummary() : await getGameweekSummary(jornada)
+  if (!summary) notFound()
+
   const { rows, predictedCount, missingCount, firstMissingMatchId } = summary
 
-  const subtitle =
+  const missingText =
     missingCount === 0
       ? 'Los tienes todos puestos'
       : `Te falta${missingCount === 1 ? '' : 'n'} ${missingCount} por poner`
+  const subtitle =
+    summary.gameweekNumber > 0 ? `Jornada ${summary.gameweekNumber} · ${missingText}` : missingText
+
+  // Volver a la MISMA jornada que se estaba repasando, no a la de por defecto.
+  const gameweekHref = jornada === null ? '/jornada' : `/jornada?j=${jornada}`
 
   // El boton salta al primer hueco; si no hay ninguno, solo devuelve a la lista.
-  const confirmHref = firstMissingMatchId ? `/jornada/${firstMissingMatchId}` : '/jornada'
+  const confirmHref = firstMissingMatchId ? `/jornada/${firstMissingMatchId}` : gameweekHref
   const confirmLabel = firstMissingMatchId ? 'Ir al primero que falta' : 'Todo listo, volver'
 
   return (
     <>
-      <ScreenHeader title="Repaso de la jornada" subtitle={subtitle} backHref="/jornada" />
+      <ScreenHeader title="Repaso de la jornada" subtitle={subtitle} backHref={gameweekHref} />
 
       <div className="flex flex-col gap-[8px] px-[14px] pt-[14px] pb-[30px]">
         <div className="mb-[2px] flex gap-[8px]">

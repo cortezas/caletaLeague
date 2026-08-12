@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 
-import { Avatar, Card, ScreenHeader, StatCard } from '@/components/ui'
+import { Card, ScreenHeader, StatCard } from '@/components/ui'
+import { EditProfile } from '@/features/profile/edit-profile'
 import { PointsChart } from '@/features/profile/points-chart'
 import { requireMember } from '@/lib/auth'
 import { getProfile } from '@/lib/data'
@@ -18,25 +19,15 @@ export default async function PerfilPage() {
       <ScreenHeader title="Perfil" size="lg" />
 
       <div className="flex flex-col gap-[12px] px-[14px] pt-[18px] pb-[30px]">
-        <section className="flex items-center gap-[14px]">
-          <Avatar name={profile.displayName} color={profile.avatarColor} size={64} />
-          <div className="min-w-0 flex-1">
-            <h2 className="truncate text-[19px] font-extrabold tracking-[-.02em]">
-              {profile.displayName}
-            </h2>
-            <p className="text-[12.5px] font-semibold text-txt3">
-              {profile.position}º de {profile.memberCount} · {profile.leagueName}
-            </p>
-          </div>
-          <div className="flex-none text-right">
-            <div className="font-num text-[34px] font-extrabold tabular-nums leading-none text-volt">
-              {profile.totalPoints}
-            </div>
-            <div className="text-[10.5px] font-extrabold uppercase tracking-[.1em] text-txt3">
-              Puntos
-            </div>
-          </div>
-        </section>
+        {/* El bloque de identidad es cliente: se edita en el sitio, sin salir del perfil. */}
+        <EditProfile
+          displayName={profile.displayName}
+          avatarColor={profile.avatarColor}
+          position={profile.position}
+          memberCount={profile.memberCount}
+          leagueName={profile.leagueName}
+          totalPoints={profile.totalPoints}
+        />
 
         <section className="grid grid-cols-2 gap-[8px]">
           <StatCard value={stats.totalPoints} label="Puntos totales" />

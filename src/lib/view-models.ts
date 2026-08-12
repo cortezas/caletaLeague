@@ -35,6 +35,23 @@ export type GameweekVM = {
   matches: MatchRowVM[]
   predictedCount: number
   totalCount: number              // matches.length, NUNCA 10 literal
+  /**
+   * Navegacion entre jornadas. Los limites son las jornadas que EXISTEN en la
+   * liga (las sembradas en `gameweeks`), nunca 1 y 38 cableados: una peña con
+   * media temporada sembrada no puede ofrecer flechas que no llevan a ningun
+   * sitio.
+   */
+  hasPrev: boolean
+  hasNext: boolean
+  prevNumber: number | null
+  nextNumber: number | null
+  /**
+   * true si esta es la jornada a la que se entra por defecto, o sea la del
+   * cierre mas proximo. Con la jornada 2 metida dentro de la 1 por los
+   * aplazamientos del Mundial, "por defecto" ya no es "la primera pendiente":
+   * ver `pickDefaultGameweek` en `data/league.ts`.
+   */
+  isDefault: boolean
 }
 
 export type SummaryVM = {

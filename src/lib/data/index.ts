@@ -7,11 +7,23 @@
  * Un `null` sigue significando "no existe o no es visible para este usuario" y
  * la page responde con `notFound()`.
  *
+ * La navegacion entre jornadas añade `getGameweek(n)` y le da a
+ * `getGameweekSummary` una jornada opcional. Sin argumento las dos siguen
+ * hablando de la jornada POR DEFECTO, que desde los aplazamientos del Mundial ya
+ * no es "la primera pendiente" sino la del cierre mas proximo: ver
+ * `pickDefaultGameweek` en `data/league.ts`.
+ *
  * Cada funcion decide su fuente: con Supabase configurado consulta la base; sin
  * el, cae en `mock.ts`. Ver la cabecera de `data/league.ts`.
  */
 
-export { getActiveGameweek, getGameweekSummary, getMatchEditor, getMatchPique } from './gameweek'
+export {
+  getActiveGameweek,
+  getGameweek,
+  getGameweekSummary,
+  getMatchEditor,
+  getMatchPique,
+} from './gameweek'
 export { getSeasonStandings, getGameweekStandings } from './standings'
 export { getProfile } from './profile'
 export { getLeagueSettings, getAdminMatches, getAdminSquads } from './league'

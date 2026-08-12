@@ -248,11 +248,31 @@ export function gameweek(number: number): CalendarGameweek | null {
   return GAMEWEEKS.find((g) => g.number === number) ?? null
 }
 
-/** La jornada en curso: la primera que aún tiene algún partido por empezar. */
+/**
+ * La jornada en curso: la que contiene el partido ABIERTO más próximo, o sea la
+ * que se cierra antes. Mismo criterio que `pickDefaultGameweek` en
+ * `src/lib/data/league.ts`, para que el modo sin Supabase no mienta.
+ *
+ * NO es "la primera que aún tiene algún partido por empezar", que es lo que
+ * hacía antes: con la jornada 2 metida dentro de la 1 (aplazamientos del
+ * Mundial 2026), el 21 de agosto eso devolvía la 1 —le queda el partido del
+ * 25— y la 2, que se cierra el 23, no aparecía nunca. Ahora el 21 sale la 2.
+ *
+ * `> t` y no `>=`: un partido que arranca justo ahora ya está sellado.
+ * Empate de horario entre dos jornadas: gana la de número menor, porque se
+ * recorre `GAMEWEEKS` en orden y solo se cambia con un kickoff ESTRICTAMENTE
+ * anterior. Sin ningún partido abierto, la última jornada del calendario.
+ */
 export function currentGameweek(now: Date = new Date()): CalendarGameweek {
   const t = now.getTime()
-  return (
-    GAMEWEEKS.find((g) => g.matches.some((m) => new Date(m.kickoffAt).getTime() > t)) ??
-    GAMEWEEKS[GAMEWEEKS.length - 1]
-  )
+
+  let best: { gameweek: CalendarGameweek; at: number } | null = null
+  for (const g of GAMEWEEKS) {
+    for (const m of g.matches) {
+      const at = Date.parse(m.kickoffAt)
+      if (at > t && (best === null || at < best.at)) best = { gameweek: g, at }
+    }
+  }
+
+  return best?.gameweek ?? GAMEWEEKS[GAMEWEEKS.length - 1]
 }

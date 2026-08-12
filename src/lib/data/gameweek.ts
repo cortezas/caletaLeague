@@ -24,14 +24,16 @@ import {
   fetchMatchRow,
   fetchMatchRows,
   getDataContext,
+  getLeagueGameweeks,
   isoUtc,
   resolveActiveGameweek,
   resultOf,
   teamVM,
 } from './league'
-import type { DataContext, MatchRow } from './league'
+import type { DataContext, GameweekRow, MatchRow } from './league'
 import {
   mockGetActiveGameweek,
+  mockGetGameweek,
   mockGetGameweekSummary,
   mockGetMatchEditor,
   mockGetMatchPique,
@@ -166,33 +168,54 @@ async function myGameweekRows(
 }
 
 /* ------------------------------------------------------------------ *
- * 3. Las cuatro funciones publicas
+ * 3. Navegacion entre jornadas
  * ------------------------------------------------------------------ */
 
-export async function getActiveGameweek(): Promise<GameweekVM> {
-  const ctx = await getDataContext()
-  if (!ctx) return mockGetActiveGameweek()
+type GameweekNav = Pick<GameweekVM, 'hasPrev' | 'hasNext' | 'prevNumber' | 'nextNumber'>
 
-  const active = await resolveActiveGameweek()
-  // Una peña recien creada, sin calendario sembrado. No es un error: no hay
-  // jornada que enseñar y la pantalla pinta su estado vacio.
-  if (!active) {
-    return {
-      number: 0,
-      competitionLabel: COMPETITION_LABEL,
-      deadlineAt: null,
-      deadlineLabel: null,
-      matches: [],
-      predictedCount: 0,
-      totalCount: 0,
-    }
+/**
+ * Las vecinas de una jornada dentro de las que SI existen en la liga. Nada de 1
+ * y 38 cableados: una peña con medio calendario sembrado tendria flechas que no
+ * llevan a ninguna parte. `getLeagueGameweeks()` ya viene ordenada por numero.
+ */
+function navOf(gameweeks: GameweekRow[], index: number): GameweekNav {
+  const prev = index > 0 ? gameweeks[index - 1] : null
+  const next = index >= 0 && index < gameweeks.length - 1 ? gameweeks[index + 1] : null
+  return {
+    hasPrev: prev !== null,
+    hasNext: next !== null,
+    prevNumber: prev?.number ?? null,
+    nextNumber: next?.number ?? null,
   }
+}
 
-  const { rows } = await myGameweekRows(ctx, active.id)
+/** Una peña recien creada, sin calendario sembrado. No es un error: es vacio. */
+const EMPTY_GAMEWEEK: GameweekVM = {
+  number: 0,
+  competitionLabel: COMPETITION_LABEL,
+  deadlineAt: null,
+  deadlineLabel: null,
+  matches: [],
+  predictedCount: 0,
+  totalCount: 0,
+  hasPrev: false,
+  hasNext: false,
+  prevNumber: null,
+  nextNumber: null,
+  isDefault: true,
+}
+
+async function buildGameweekVM(
+  ctx: DataContext,
+  gameweek: GameweekRow,
+  nav: GameweekNav,
+  isDefault: boolean,
+): Promise<GameweekVM> {
+  const { rows } = await myGameweekRows(ctx, gameweek.id)
   const firstOpen = rows.find((row) => row.status === 'open') ?? null
 
   return {
-    number: active.number,
+    number: gameweek.number,
     competitionLabel: COMPETITION_LABEL,
     deadlineAt: firstOpen ? firstOpen.kickoffAt : null,
     // Guion largo SIN espacios: es como lo pinta el eyebrow del prototipo.
@@ -200,15 +223,68 @@ export async function getActiveGameweek(): Promise<GameweekVM> {
     matches: rows,
     predictedCount: rows.filter((row) => row.myPrediction !== null).length,
     totalCount: rows.length, // D19(b): nunca el literal 10
+    ...nav,
+    isDefault,
   }
 }
 
-export async function getGameweekSummary(): Promise<SummaryVM> {
+/* ------------------------------------------------------------------ *
+ * 4. Las funciones publicas
+ * ------------------------------------------------------------------ */
+
+/** La jornada del cierre mas proximo. Ver `pickDefaultGameweek` en `league.ts`. */
+export async function getActiveGameweek(): Promise<GameweekVM> {
   const ctx = await getDataContext()
-  if (!ctx) return mockGetGameweekSummary()
+  if (!ctx) return mockGetActiveGameweek()
 
   const active = await resolveActiveGameweek()
-  if (!active) {
+  if (!active) return EMPTY_GAMEWEEK
+
+  const gameweeks = await getLeagueGameweeks()
+  const index = gameweeks.findIndex((gw) => gw.id === active.id)
+
+  return buildGameweekVM(ctx, active, navOf(gameweeks, index), true)
+}
+
+/**
+ * Una jornada concreta, para las flechas de la pantalla de pronostico.
+ * `null` si ese numero no existe en la liga del usuario.
+ */
+export async function getGameweek(n: number): Promise<GameweekVM | null> {
+  const ctx = await getDataContext()
+  if (!ctx) return mockGetGameweek(n)
+
+  const gameweeks = await getLeagueGameweeks()
+  const index = gameweeks.findIndex((gw) => gw.number === n)
+  if (index === -1) return null
+
+  const gameweek = gameweeks[index]
+  const active = await resolveActiveGameweek()
+
+  return buildGameweekVM(ctx, gameweek, navOf(gameweeks, index), active?.id === gameweek.id)
+}
+
+/**
+ * El repaso de una jornada. Sin argumento, el de la jornada por defecto.
+ *
+ * `null` SOLO cuando se pide un numero que no existe en la liga; sin argumento y
+ * sin calendario sembrado sigue devolviendo el resumen vacio, que es lo que la
+ * pantalla ya sabe pintar.
+ */
+export async function getGameweekSummary(n?: number): Promise<SummaryVM | null> {
+  const ctx = await getDataContext()
+  if (!ctx) return mockGetGameweekSummary(n)
+
+  let target: GameweekRow | null
+  if (n === undefined) {
+    target = await resolveActiveGameweek()
+  } else {
+    const gameweeks = await getLeagueGameweeks()
+    target = gameweeks.find((gw) => gw.number === n) ?? null
+    if (!target) return null
+  }
+
+  if (!target) {
     return {
       gameweekNumber: 0,
       rows: [],
@@ -218,13 +294,13 @@ export async function getGameweekSummary(): Promise<SummaryVM> {
     }
   }
 
-  const { rows } = await myGameweekRows(ctx, active.id)
+  const { rows } = await myGameweekRows(ctx, target.id)
 
   const predictedCount = rows.filter((row) => row.myPrediction !== null).length
   const firstMissing = rows.find((row) => row.status === 'open' && row.myPrediction === null) ?? null
 
   return {
-    gameweekNumber: active.number,
+    gameweekNumber: target.number,
     rows: rows.map((row, index) => ({
       index: index + 1,
       matchId: row.id,

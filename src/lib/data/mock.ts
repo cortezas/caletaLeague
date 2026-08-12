@@ -161,9 +161,25 @@ function viewOf(gw: CalendarGameweek, now: number): GameweekView {
   }
 }
 
-/** La jornada activa: la primera que aun tiene algun partido por empezar. */
+/** La jornada por defecto: la del cierre mas proximo. Ver `currentGameweek`. */
 function activeView(now: number): GameweekView {
   return viewOf(currentGameweek(new Date(now)), now)
+}
+
+/**
+ * Las vecinas dentro del calendario, no 1 y 38 cableados: si algun dia se siembra
+ * media temporada, las flechas tienen que morir donde muere el calendario.
+ */
+function navOf(number: number): Pick<GameweekVM, 'hasPrev' | 'hasNext' | 'prevNumber' | 'nextNumber'> {
+  const index = GAMEWEEKS.findIndex((g) => g.number === number)
+  const prev = index > 0 ? GAMEWEEKS[index - 1] : null
+  const next = index >= 0 && index < GAMEWEEKS.length - 1 ? GAMEWEEKS[index + 1] : null
+  return {
+    hasPrev: prev !== null,
+    hasNext: next !== null,
+    prevNumber: prev?.number ?? null,
+    nextNumber: next?.number ?? null,
+  }
 }
 
 /** Un partido puede venir de cualquiera de las 38 jornadas, no solo de la activa. */
@@ -309,11 +325,13 @@ function usedPlayerNames(now: number): string[] {
  * 5. Las 9 funciones de la capa de datos
  * ------------------------------------------------------------------ */
 
-export async function mockGetActiveGameweek(): Promise<GameweekVM> {
-  const { myId, now, scoring } = await context()
-  const view = activeView(now)
+function gameweekVM(
+  view: GameweekView,
+  myId: string,
+  scoring: Scoring,
+  isDefault: boolean,
+): GameweekVM {
   const matches = myRows(view, myId, scoring)
-
   const firstOpen = matches.find((m) => m.status === 'open') ?? null
 
   return {
@@ -325,12 +343,35 @@ export async function mockGetActiveGameweek(): Promise<GameweekVM> {
     matches,
     predictedCount: matches.filter((m) => m.myPrediction !== null).length,
     totalCount: matches.length, // D19(b): nunca el literal 10
+    ...navOf(view.number),
+    isDefault,
   }
 }
 
-export async function mockGetGameweekSummary(): Promise<SummaryVM> {
+export async function mockGetActiveGameweek(): Promise<GameweekVM> {
   const { myId, now, scoring } = await context()
-  const view = activeView(now)
+  return gameweekVM(activeView(now), myId, scoring, true)
+}
+
+/** `null` si esa jornada no esta en el calendario. */
+export async function mockGetGameweek(n: number): Promise<GameweekVM | null> {
+  const gw = gameweek(n)
+  if (!gw) return null
+
+  const { myId, now, scoring } = await context()
+  const isDefault = currentGameweek(new Date(now)).number === n
+
+  return gameweekVM(viewOf(gw, now), myId, scoring, isDefault)
+}
+
+/** Sin argumento, el repaso de la jornada por defecto. `null` si el numero no existe. */
+export async function mockGetGameweekSummary(n?: number): Promise<SummaryVM | null> {
+  const { myId, now, scoring } = await context()
+
+  const gw = n === undefined ? currentGameweek(new Date(now)) : gameweek(n)
+  if (!gw) return null
+
+  const view = viewOf(gw, now)
   const matches = myRows(view, myId, scoring)
 
   const rows = matches.map((m, i) => ({

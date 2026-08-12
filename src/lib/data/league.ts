@@ -260,7 +260,64 @@ export function isUuid(value: string): boolean {
   return UUID_RE.test(value)
 }
 
-/** La jornada activa: la primera POR NUMERO que aun tiene algun partido por empezar. */
+/**
+ * La jornada por defecto: la que contiene el partido ABIERTO (pitido inicial
+ * todavia en el futuro) mas proximo. O sea, la que se CIERRA antes.
+ *
+ * POR QUE NO VALE "la primera por numero que aun tiene partidos pendientes"
+ * Los aplazamientos del Mundial 2026 han metido la jornada 2 DENTRO de la 1: la
+ * 1 va del 15 al 27 de agosto y la 2, entera, del 20 al 24. Con el criterio
+ * viejo el 21 de agosto salia la 1 (le quedaba el partido del 25) y la 2 no se
+ * podia pronosticar NUNCA: cuando la 1 terminaba, la 2 ya se habia jugado.
+ * Con este criterio el 21 de agosto sale la 2, cuyo siguiente partido abierto
+ * es el del 23, antes que el del 25 de la 1. Y el 26, con la 2 ya jugada,
+ * vuelve a salir la 1, que aun tiene el partido del 27.
+ *
+ * `> now` y no `>=`: un partido que arranca justo en este instante ya esta
+ * sellado, y asi lo ven tanto `effectiveStatus` como la politica RLS.
+ *
+ * Empate exacto de kickoff entre dos jornadas: gana la de numero menor, para
+ * que el resultado no dependa del orden en que lleguen las filas.
+ *
+ * Sin ningun partido abierto (temporada terminada) devuelve la ULTIMA jornada
+ * CON PARTIDOS, que es la que queda por repasar.
+ *
+ * Pura a proposito: es la unica logica delicada de este fichero y asi se puede
+ * comprobar contra el calendario real sin levantar Supabase.
+ */
+export function pickDefaultGameweek(
+  gameweeks: GameweekRow[],
+  matches: Array<{ gameweek_id: string; kickoff_at: string }>,
+  now: number,
+): GameweekRow | null {
+  if (gameweeks.length === 0) return null
+
+  const byId = new Map(gameweeks.map((gw) => [gw.id, gw]))
+
+  let nextOpen: { gw: GameweekRow; at: number } | null = null
+  let lastWithMatches: GameweekRow | null = null
+
+  for (const row of matches) {
+    // Un partido de otra liga no deberia llegar hasta aqui (RLS y el filtro por
+    // league_id lo cortan), pero si llega no puede mandar sobre mi jornada.
+    const gw = byId.get(row.gameweek_id)
+    if (!gw) continue
+
+    if (!lastWithMatches || gw.number > lastWithMatches.number) lastWithMatches = gw
+
+    const at = Date.parse(row.kickoff_at)
+    if (!Number.isFinite(at) || at <= now) continue
+
+    const better =
+      !nextOpen || at < nextOpen.at || (at === nextOpen.at && gw.number < nextOpen.gw.number)
+    if (better) nextOpen = { gw, at }
+  }
+
+  // El ultimo respaldo es para una liga con jornadas sembradas y ni un partido.
+  return nextOpen?.gw ?? lastWithMatches ?? gameweeks[gameweeks.length - 1]
+}
+
+/** La jornada por defecto de MI liga. Ver `pickDefaultGameweek` para el criterio. */
 export const resolveActiveGameweek = cache(async (): Promise<GameweekRow | null> => {
   const ctx = await getDataContext()
   if (!ctx) return null
@@ -268,21 +325,16 @@ export const resolveActiveGameweek = cache(async (): Promise<GameweekRow | null>
   const gameweeks = await getLeagueGameweeks()
   if (gameweeks.length === 0) return null
 
+  // Sin filtro por fecha: hace falta el calendario entero para poder caer en la
+  // ultima jornada con partidos cuando ya no queda ninguno abierto.
   const { data, error } = await ctx.supabase
     .from('matches')
-    .select('gameweek_id, gameweeks!inner(league_id)')
+    .select('gameweek_id, kickoff_at, gameweeks!inner(league_id)')
     .eq('gameweeks.league_id', ctx.leagueId)
-    .gt('kickoff_at', new Date(ctx.now).toISOString())
   if (error) throw error
 
-  const pending = new Set(
-    ((data ?? []) as unknown as Array<{ gameweek_id: string }>).map((row) => row.gameweek_id),
-  )
-
-  // Ojo al orden: NO vale "la jornada del proximo partido por hora". La jornada 1
-  // acaba el 27 de agosto y la 2 empieza el 20: a fecha 21 el proximo partido es
-  // de la 2, pero la 1 sigue admitiendo pronosticos y es la que manda.
-  return gameweeks.find((gw) => pending.has(gw.id)) ?? gameweeks[gameweeks.length - 1]
+  const rows = (data ?? []) as unknown as Array<{ gameweek_id: string; kickoff_at: string }>
+  return pickDefaultGameweek(gameweeks, rows, ctx.now)
 })
 
 /** Ids de jornada con al menos un partido jugado. Base de "temporada en curso". */
