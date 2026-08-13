@@ -2,11 +2,12 @@ import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 
 import { ScreenHeader } from '@/components/ui'
+import { LineupSection } from '@/features/lineups/lineup-section'
 import { Highlights } from '@/features/pique/highlights'
 import { PiqueRow } from '@/features/pique/pique-row'
 import { ResultHeader } from '@/features/pique/result-header'
 import { requireMember } from '@/lib/auth'
-import { getMatchPique } from '@/lib/data'
+import { getMatchPique, getMatchLineups } from '@/lib/data'
 import { formatKickoff } from '@/lib/format'
 
 export const metadata: Metadata = { title: 'El pique · La Caleta League' }
@@ -18,7 +19,8 @@ export default async function PartidoPage({ params }: { params: Promise<{ matchI
 
   const { matchId } = await params
 
-  const pique = await getMatchPique(matchId)
+  // Guardadas en nuestra base por el cron: la pantalla nunca llama a la API.
+  const [pique, lineups] = await Promise.all([getMatchPique(matchId), getMatchLineups(matchId)])
   if (!pique) notFound()
 
   const { match, highlights, rows, memberCount } = pique
@@ -34,6 +36,12 @@ export default async function PartidoPage({ params }: { params: Promise<{ matchI
 
       <div className="flex flex-col gap-[12px] px-[14px] pt-[16px] pb-[30px]">
         <ResultHeader match={match} />
+        <LineupSection
+          lineups={lineups}
+          home={match.home}
+          away={match.away}
+          kickoffAt={match.kickoffAt}
+        />
         <Highlights items={highlights} />
 
         <div className="mt-[4px] flex items-baseline justify-between">

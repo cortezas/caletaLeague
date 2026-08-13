@@ -156,6 +156,44 @@ export type AdminGameweekVM = {
 }
 
 /**
+ * La alineacion de un partido, para pintar el campo.
+ *
+ * Sale ENTERA de `public.match_lineups` (la escribe el cron): la pantalla no
+ * llama a Highlightly ni una sola vez. Doce personas abriendo el mismo partido
+ * serian doce peticiones, y el plan gratuito da 100 AL DIA.
+ *
+ * `position` ya viene traducida a nuestras cuatro lineas: la API dice
+ * 'Goalkeeper'/'Defender'/'Midfielder'/'Forward' y quien traduce es
+ * `src/lib/data/lineups.ts`, no el componente.
+ */
+export type LineupPlayerVM = {
+  name: string
+  /** Dorsal. `null` cuando la API no lo manda: se pinta el hueco, no un cero. */
+  number: number | null
+  position: 'GK' | 'DEF' | 'MID' | 'FWD'
+}
+
+export type TeamLineupVM = {
+  /** '4-3-3'. `null` si la API no la da: entonces se coloca por `position` y ya. */
+  formation: string | null
+  starters: LineupPlayerVM[]
+  substitutes: LineupPlayerVM[]
+}
+
+/**
+ * `available: false` es el estado NORMAL hasta una hora antes del partido, no un
+ * error: las alineaciones oficiales no existen antes. La pantalla dice "No
+ * disponible todavia" y explica cuando salen.
+ */
+export type MatchLineupsVM = {
+  available: boolean
+  /** ISO de cuando se guardo. `null` mientras no haya nada guardado. */
+  fetchedAt: string | null
+  home: TeamLineupVM | null
+  away: TeamLineupVM | null
+}
+
+/**
  * Una fila de `public.team_squads` para el panel de organizador. `source` es lo
  * unico que distingue "De la API" de "Corregida a mano": la ingesta escribe con
  * 'api' y NUNCA pisa una fila 'admin', asi que en cuanto el organizador corrige

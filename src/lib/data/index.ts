@@ -42,5 +42,14 @@ export { getLeagueSettings, getAdminMatches, getAdminSquads } from './league'
 export { getSquadsForMatch, getUsedPlayerNames } from './squads'
 export type { MatchSquad } from './squads'
 
+/**
+ * El once y el banquillo de un partido. Sale de `public.match_lineups`, que
+ * llena el cron: la pantalla NO llama a Highlightly (100 peticiones al dia, y
+ * doce personas abriendo el mismo partido serian doce). Nunca devuelve `null` ni
+ * lanza: sin alineacion guardada devuelve `available: false`, que es el estado
+ * normal hasta una hora antes del pitido inicial.
+ */
+export { getMatchLineups } from './lineups'
+
 /** Hay backend pero quien pregunta no es miembro: lo lanzan las 9 funciones. */
 export { NoMemberError } from './league'

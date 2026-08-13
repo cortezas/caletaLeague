@@ -1,23 +1,31 @@
 /**
  * `POST /api/sync` - dispara la ingesta.
  *
- * Tres pasos, dos proveedores y dos cuotas muy distintas:
+ * Cuatro pasos, dos proveedores y dos cuotas muy distintas:
  *   1. partidos, jornadas, horarios y marcadores (`syncMatches`, football-data.org);
  *   2. plantillas de los 20 equipos (`syncSquads`, football-data.org), que se
  *      pueden saltar con `?squads=0` en las pasadas frecuentes de dia de partido;
  *   3. goleadores y asistencias (`syncMatchEvents`, Highlightly), que se pueden
- *      saltar con `?events=0`.
+ *      saltar con `?events=0`;
+ *   4. alineaciones de lo que arranca en los proximos 90 minutos (`syncLineups`,
+ *      Highlightly), que se pueden saltar con `?lineups=0`.
  *
  * El paso 1 es el imprescindible: sin el no hay calendario y no se puede jugar.
- * Los pasos 2 y 3 son SUBORDINADOS y no lanzan NUNCA: devuelven su fallo dentro
- * del informe (`squads` / `events`) y la sincronizacion de partidos se da por
- * buena igual.
+ * Los pasos 2, 3 y 4 son SUBORDINADOS y no lanzan NUNCA: devuelven su fallo
+ * dentro del informe (`squads` / `events` / `lineups`) y la sincronizacion de
+ * partidos se da por buena igual.
  *
  * CUOTAS, que no son la misma:
  *   - football-data.org: 10 peticiones por MINUTO. Los pasos 1 y 2 gastan 1 cada uno.
- *   - Highlightly:      100 peticiones al DIA. El paso 3 gasta 1 por dia de
- *     partido consultado mas 1 por partido terminado pendiente, con un tope por
- *     pasada (`?maxRequests=`, 40 por defecto). Desglose en docs/EVENTOS.md.
+ *   - Highlightly:      100 peticiones al DIA, COMPARTIDAS entre los pasos 3 y 4.
+ *     El paso 3 gasta 1 por dia de partido consultado mas 1 por partido terminado
+ *     pendiente, con un tope por pasada (`?maxRequests=`, 40 por defecto). El
+ *     paso 4 gasta 1 por dia mas 1 por partido de la ventana sin alineacion, con
+ *     un tope propio de 12. Desglose en docs/EVENTOS.md y en `syncLineups`.
+ *
+ * POR QUE LAS ALINEACIONES LAS PIDE EL CRON Y NO LA PANTALLA: doce personas
+ * abriendo el mismo partido serian doce peticiones. Se piden una vez, se guardan
+ * en `match_lineups` y la app lee de la base.
  *
  * La llama un CRON, no una persona: por eso NO se protege con sesion de usuario
  * (D13 habla de Server Actions, aqui no hay ninguna sesion que comprobar) sino
@@ -40,6 +48,7 @@ import { isFootballDataConfigured, FootballDataError } from '@/lib/football-data
 import { syncMatches, type SyncReport } from '@/lib/football-data/ingest'
 import { syncSquads, type SquadSyncReport } from '@/lib/football-data/squads'
 import { syncMatchEvents, type EventsSyncReport } from '@/lib/highlightly/events'
+import { syncLineups, type LineupsSyncReport } from '@/lib/highlightly/lineups'
 
 // Necesita `node:crypto` y la service role key: nunca en edge. Es el valor por
 // defecto, pero se declara para que quede escrito por que no puede ser otro.
@@ -68,6 +77,7 @@ function revalidateIfChanged(
   report: SyncReport,
   squads: SquadSyncReport | null,
   events: EventsSyncReport | null,
+  lineups: LineupsSyncReport | null,
 ): void {
   const changed =
     report.gameweeksUpserted > 0 ||
@@ -78,7 +88,12 @@ function revalidateIfChanged(
     (squads?.upserted ?? 0) > 0 ||
     // Un goleador nuevo cambia los puntos de todo el mundo: si no se invalida,
     // la clasificacion se sirve cacheada y el cron parece no hacer nada.
-    (events?.written ?? 0) > 0
+    (events?.written ?? 0) > 0 ||
+    // Una alineacion recien guardada tiene que verse YA: llega una hora antes
+    // del partido, que es justo la ventana en la que aun se puede cambiar el
+    // pronostico. La pagina del partido es dinamica (lee cookies) y no se
+    // cachea, pero /jornada si.
+    (lineups?.saved ?? 0) > 0
   if (!changed) return
 
   revalidatePath('/jornada')
@@ -144,6 +159,9 @@ export async function POST(request: Request) {
   // Goleadores y asistencias. Se puede apagar con `?events=0` para una pasada que
   // solo quiera refrescar horarios sin tocar la cuota diaria de Highlightly.
   const withEvents = url.searchParams.get('events') !== '0'
+  // Alineaciones de lo que arranca ya. Mismo proveedor y MISMA cuota diaria que
+  // los goleadores: `?lineups=0` la apaga si un dia hay que reservarla.
+  const withLineups = url.searchParams.get('lineups') !== '0'
 
   // Tope de peticiones a Highlightly de ESTA pasada. La cuota es de 100 al DIA y
   // la comparten todas las pasadas, asi que una sola no puede comersela entera.
@@ -173,8 +191,17 @@ export async function POST(request: Request) {
     // API se cae, el aviso viaja dentro de `events` con `skipped: true`.
     const events = withEvents ? await syncMatchEvents({ leagueId: report.leagueId, maxRequests }) : null
 
-    revalidateIfChanged(report, squads, events)
-    return Response.json({ ...report, squads, events }, { status: 200 })
+    // Cuarto paso, mismo proveedor y misma cuota diaria que el tercero. Va el
+    // ULTIMO a proposito: mira `matches.kickoff_at`, que el paso 1 acaba de
+    // actualizar, y con un horario movido la ventana de 90 minutos seria otra.
+    // NO comparte el `maxRequests` del paso 3: ese tope se reparte entre partidos
+    // ya jugados, y estas son las que estan a punto de empezar; que un recuperado
+    // de goleadores se coma el presupuesto dejaria a la peña sin el once justo
+    // cuando aun podia cambiar el pronostico. Tampoco lanza nunca.
+    const lineups = withLineups ? await syncLineups({ leagueId: report.leagueId }) : null
+
+    revalidateIfChanged(report, squads, events, lineups)
+    return Response.json({ ...report, squads, events, lineups }, { status: 200 })
   } catch (error) {
     if (error instanceof FootballDataError) {
       // 429 y 5xx son transitorios: se devuelve 503 para que el cron reintente,

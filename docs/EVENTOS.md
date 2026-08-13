@@ -90,11 +90,34 @@ de acierto sale en el informe de cada pasada (`nameMatch`).
 - **Partido que no se puede emparejar**: se registra en `linkFailures` y se salta.
   Nunca se adivina.
 
-## Alineaciones y avisos
+## Alineaciones
 
-`getLineups` devuelve once y suplentes. `findMissingPicks` cruza eso con los
-pronósticos de la peña y devuelve **quién ha apostado por alguien que no está
-convocado**.
+`getLineups` devuelve once y suplentes.
+
+**Se guardan en nuestra base y la app NUNCA llama a la API.** La tabla es
+`public.match_lineups` (migración `0013`), una fila por partido. La razón es la
+cuota: doce personas abriendo el mismo partido serían doce peticiones, y el plan
+gratuito da 100 **al día**. Quien pide es el cron; la pantalla lee de la tabla
+con `getMatchLineups` (`src/lib/data/index.ts`), que nunca lanza ni devuelve
+`null`: sin fila guardada devuelve `available: false` y se pinta "Alineaciones
+aún no disponibles".
+
+`syncLineups` (`src/lib/highlightly/lineups.ts`) solo pide las de los partidos
+que arrancan **en los próximos 90 minutos y que aún no tienen fila**. En cuanto
+consigue una, deja de pedirla. Fuera de esa ventana sale antes de llamar a nadie:
+cero peticiones.
+
+**PENDIENTE DE CONFIRMAR:** sigue sin saberse si Highlightly publica la alineación
+*antes* del partido. Todo lo probado son partidos ya jugados o filas metidas a
+mano. Se comprueba mirando la sección `lineups` del informe de `/api/sync` en la
+hora previa a un partido de verdad: si repite `not-published` pasada tras pasada,
+la API solo las publica con el partido empezado y esta función no sirve para lo
+que se pensó.
+
+## Avisos de jugador no convocado
+
+`findMissingPicks` cruza el once con los pronósticos de la peña y devuelve **quién
+ha apostado por alguien que no está convocado**.
 
 La idea: un aviso al móvil en la ventana entre que sale la alineación (una hora
 antes) y el pitido inicial, que es cuando el pronóstico aún se puede cambiar.
@@ -102,17 +125,27 @@ antes) y el pitido inicial, que es cuando el pronóstico aún se puede cambiar.
 > **Lewandowski no está en el once del Barça.**
 > Lo tienes de goleador. Quedan 47 minutos.
 
-**PENDIENTE DE CONFIRMAR:** no sabemos si Highlightly publica la alineación *antes*
-del partido. Se ha probado con partidos ya jugados, donde obviamente está. Solo se
-puede comprobar en directo, una hora antes de un partido de verdad. Hasta
-entonces, el envío de avisos **no está enganchado**: las funciones están listas y
-se conectan a `src/lib/push/` cuando se confirme.
+Esto **sigue sin estar enganchado**: las funciones están listas y se conectan a
+`src/lib/push/` cuando se confirme lo de arriba. Que las alineaciones se guarden
+no implica que el aviso se envíe.
 
 ## Cómo se ejecuta
 
 Va dentro de `/api/sync`, detrás de la ingesta de football-data.org. Si falta
-`HIGHLIGHTLY_API_KEY`, el paso se salta con un aviso y **no rompe** la ingesta
+`HIGHLIGHTLY_API_KEY`, los pasos se saltan con un aviso y **no rompen** la ingesta
 principal, que es la que sostiene el calendario.
 
-El informe de cada pasada trae `events` con: peticiones gastadas, partidos escritos,
-tasa de acierto de nombres, fallos de emparejamiento y avisos.
+El informe de cada pasada trae `events` y `lineups` con: peticiones gastadas,
+partidos escritos, fallos de emparejamiento y avisos.
+
+Dos frecuencias distintas en `.github/workflows/cron.yml`:
+
+| Pasada | Qué llama | Para qué |
+| --- | --- | --- |
+| cada 15 min | `/api/sync?squads=0&events=0` | alineaciones: seis oportunidades por partido en vez de dos |
+| cada hora (min. 7) | `/api/sync` | calendario, marcadores, plantillas y goleadores |
+
+Gasto de Highlightly por jornada: ~6 peticiones por horario de partido, ~24 en un
+sábado de cuatro horarios, ~50 repartidas en tres días. La cuota son 100 **al
+día** y la comparten con los goleadores (~14 por jornada). Cabe, pero un sábado
+grande deja poco margen: si hiciera falta, `?lineups=0` o `?maxRequests=`.

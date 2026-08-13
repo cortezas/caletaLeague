@@ -19,10 +19,11 @@ name: Cron
 
 on:
   schedule:
-    # Avisos: cada 15 minutos. GitHub no garantiza puntualidad al minuto y
-    # puede retrasarse en horas de mucha carga; es aceptable para un aviso con
-    # una hora de antelacion. No lo seria para sellar pronosticos, pero de eso
-    # se encarga la base de datos con kickoff_at, no un cron.
+    # Avisos y alineaciones: cada 15 minutos. GitHub no garantiza puntualidad al
+    # minuto y puede retrasarse en horas de mucha carga; es aceptable para un
+    # aviso con una hora de antelacion y para unas alineaciones que se piden
+    # durante los 90 minutos previos al partido. No lo seria para sellar
+    # pronosticos, pero de eso se encarga la base de datos con kickoff_at.
     - cron: '*/15 * * * *'
     # Ingesta: una vez por hora. El calendario no cambia cada cuarto de hora y
     # la API gratuita solo admite 10 peticiones por minuto.
@@ -51,9 +52,36 @@ jobs:
           # 503 = sin claves VAPID configuradas. No es un fallo del cron.
           if [ "$code" != "200" ] && [ "$code" != "503" ]; then exit 1; fi
 
+      - name: Alineaciones (cada 15 minutos)
+        # POR QUE ESTE PASO EXISTE
+        # Las alineaciones oficiales salen sobre una HORA antes del pitido, pero
+        # no a una hora clavada: para un partido de las 19:30 pueden aparecer a
+        # las 18:35 o a las 19:15. `syncLineups` solo pide las de lo que arranca
+        # en los proximos 90 minutos, asi que con la ingesta SOLO horaria un
+        # partido de las 19:30 tenia dos oportunidades (18:07 y 19:07) y una
+        # alineacion publicada a las 19:15 no se llegaba a pedir nunca. Cada 15
+        # minutos son seis.
+        #
+        # POR QUE NO GASTA CUOTA
+        # `squads=0` se salta las plantillas (1 peticion a football-data que no
+        # cambia de un cuarto de hora a otro) y `events=0` deja los goleadores
+        # para la pasada horaria, que es la que tiene presupuesto para ellos.
+        # Queda el paso 1 (1 peticion a football-data por pasada, contra un
+        # limite de 10 por MINUTO) y el paso 4, que FUERA de la ventana de 90
+        # minutos sale antes de llamar a nadie: cero peticiones de Highlightly.
+        # Solo gasta los dias de partido y solo en la hora previa.
+        if: ${{ github.event.schedule == '*/15 * * * *' }}
+        run: |
+          code=$(curl -sS -o /tmp/lineups.json -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            --max-time 120 "$BASE/api/sync?squads=0&events=0")
+          echo "HTTP $code"; head -c 600 /tmp/lineups.json || true; echo
+          [ "$code" = "200" ]
+
       - name: Ingesta de partidos y resultados
-        # Solo en la pasada horaria (o a mano). En las de cada 15 minutos este
-        # paso se salta: seria gastar cuota de la API para nada.
+        # Solo en la pasada horaria (o a mano). La de cada 15 minutos hace su
+        # propia llamada recortada (paso de arriba); esta es la completa, con
+        # plantillas y goleadores.
         if: ${{ github.event.schedule == '7 * * * *' || github.event_name == 'workflow_dispatch' }}
         run: |
           code=$(curl -sS -o /tmp/sync.json -w '%{http_code}' -X POST \
