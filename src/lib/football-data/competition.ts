@@ -43,7 +43,7 @@
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 
-import { SEASON } from '@/lib/laliga'
+import { SEASON, TEAMS, TEAM_CODES } from '@/lib/laliga'
 import type { TeamCode } from '@/lib/types'
 import { COMPETITION_CODE, FootballDataError } from './client'
 import { TEAM_ID_OVERRIDES, type UnknownTeam } from './ingest'
@@ -447,7 +447,44 @@ export async function syncCompetition(
     const standingRows: StandingRow[] = []
     const seenCodes = new Set<TeamCode>()
 
-    for (const row of table) {
+    // La tabla de la temporada ANTERIOR no se guarda.
+    //
+    // La API se contradice: dice `filters.season: "2026"` y `currentMatchday: 1`,
+    // pero sirve filas con 38 partidos jugados, y entre ellas Girona y Real
+    // Oviedo, que descendieron y no juegan la 2026/27. Guardarla significaria
+    // enseñar en la pestaña "LaLiga" una tabla con tres equipos que no estan en
+    // la competicion, y ninguno de los tres ascendidos.
+    //
+    // En su lugar se siembran los 20 equipos REALES a cero. No es inventar nada:
+    // "estos veinte juegan LaLiga 2026/27 y llevan cero puntos porque no se ha
+    // jugado nada" es cierto. Y la pestaña sirve para algo desde el primer dia:
+    // se ve quien esta en la liga. En cuanto ruede el balon, la API deja de
+    // contradecirse y esta rama no vuelve a entrar.
+    if (report.looksPreviousSeason) {
+      const alfabetico = [...TEAM_CODES].sort((a, b) =>
+        TEAMS[a].name.localeCompare(TEAMS[b].name, 'es'),
+      )
+      for (const [i, code] of alfabetico.entries()) {
+        standingRows.push({
+          team_code: code,
+          position: i + 1,
+          points: 0,
+          played_games: 0,
+          goals_for: 0,
+          goals_against: 0,
+          form: [],
+          updated_at: fetchedAt,
+        })
+      }
+      report.warnings.push(
+        'La API sirve todavia la clasificacion FINAL de la temporada anterior (dice ' +
+          `currentMatchday=${currentMatchday} pero manda filas con partidos jugados, y entre ellas ` +
+          'equipos descendidos). NO se guarda: se siembran los 20 equipos de la temporada actual a ' +
+          'cero, ordenados alfabeticamente. Se corrige sola en cuanto se juegue la primera jornada.',
+      )
+    }
+
+    for (const row of report.looksPreviousSeason ? [] : table) {
       const code = resolveTeamById(row.team)
       if (!code) {
         // INVARIANTE 1: no se adivina. Un descendido de la temporada pasada, un
@@ -601,13 +638,9 @@ export async function syncCompetition(
           'un descendido de la temporada pasada, esto es lo esperado.',
       )
     }
-    if (report.looksPreviousSeason) {
-      report.warnings.push(
-        'La clasificacion que sirve la API es todavia la FINAL de la temporada anterior (la ' +
-          `${SEASON} no ha empezado: currentMatchday=${currentMatchday} y las filas traen partidos ` +
-          'jugados). Se guarda igual y se corregira sola en cuanto se juegue la primera jornada.',
-      )
-    }
+    // El aviso de `looksPreviousSeason` ya lo pone donde se decide sembrar los 20
+    // a cero, arriba. Repetirlo aqui, ademas, diria "se guarda igual", que dejo
+    // de ser verdad en cuanto se decidio NO guardar la tabla vieja.
     if (report.scorersFetched === 0) {
       report.warnings.push(
         'La API no da ningun goleador todavia: no se ha jugado nada. La tabla queda vacia a ' +
