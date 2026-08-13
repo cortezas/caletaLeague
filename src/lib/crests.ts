@@ -57,30 +57,47 @@ export const KITS: Record<TeamCode, KitPattern> = {
 }
 
 /**
- * Escudos reales, opcionales. Vacio a proposito: descomenta las lineas cuando
- * pongas los ficheros en `public/crests/`.
+ * Escudos reales. ACTIVOS.
+ *
+ * DE DONDE SALEN
+ * Del CDN de football-data.org (`https://crests.football-data.org/{id}.png`), que
+ * es la misma API cuyo plan gratuito ya alimenta el calendario, los resultados y
+ * las plantillas: los sirve ella como parte de los datos del equipo. No se ha
+ * scrapeado nada de LaLiga ni de las webs de los clubes.
+ *
+ * Se descargaron una vez y se sirven desde `public/crests/` en vez de enlazar al
+ * CDN: van desde nuestro dominio (mas rapido), no dependen de que su CDN este en
+ * pie, y siguen viendose con la app instalada y sin cobertura decente.
+ * Reescalados a 96px, que es el doble del distintivo mas grande (46px): 98 KB los
+ * veinte, la mitad que los originales de 200px.
+ *
+ * SI ALGUN DIA HAY QUE QUITARLOS
+ * Los escudos son marca registrada de cada club. Para una peña privada de trece
+ * personas el riesgo es nulo, pero si esto se abriera al publico habria que
+ * revisarlo. Vaciar este mapa devuelve la app a los patrones de equipacion
+ * originales sin tocar ni una linea mas: `TeamBadge` cae solo en ese modo.
  */
 export const CREST_FILES: Partial<Record<TeamCode, string>> = {
-  // ALA: '/crests/ALA.png',
-  // ATH: '/crests/ATH.png',
-  // ATM: '/crests/ATM.png',
-  // BAR: '/crests/BAR.png',
-  // BET: '/crests/BET.png',
-  // CEL: '/crests/CEL.png',
-  // DEP: '/crests/DEP.png',
-  // ELC: '/crests/ELC.png',
-  // ESP: '/crests/ESP.png',
-  // GET: '/crests/GET.png',
-  // LEV: '/crests/LEV.png',
-  // MAL: '/crests/MAL.png',
-  // OSA: '/crests/OSA.png',
-  // RAC: '/crests/RAC.png',
-  // RAY: '/crests/RAY.png',
-  // RMA: '/crests/RMA.png',
-  // RSO: '/crests/RSO.png',
-  // SEV: '/crests/SEV.png',
-  // VAL: '/crests/VAL.png',
-  // VIL: '/crests/VIL.png',
+  ALA: '/crests/ALA.png',
+  ATH: '/crests/ATH.png',
+  ATM: '/crests/ATM.png',
+  BAR: '/crests/BAR.png',
+  BET: '/crests/BET.png',
+  CEL: '/crests/CEL.png',
+  DEP: '/crests/DEP.png',
+  ELC: '/crests/ELC.png',
+  ESP: '/crests/ESP.png',
+  GET: '/crests/GET.png',
+  LEV: '/crests/LEV.png',
+  MAL: '/crests/MAL.png',
+  OSA: '/crests/OSA.png',
+  RAC: '/crests/RAC.png',
+  RAY: '/crests/RAY.png',
+  RMA: '/crests/RMA.png',
+  RSO: '/crests/RSO.png',
+  SEV: '/crests/SEV.png',
+  VAL: '/crests/VAL.png',
+  VIL: '/crests/VIL.png',
 }
 
 export function crestFile(code: TeamCode): string | null {
