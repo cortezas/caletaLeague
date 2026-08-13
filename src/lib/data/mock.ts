@@ -237,6 +237,10 @@ function matchRowVM(match: Match, myPrediction: Prediction | null, scoring: Scor
     result,
     myPoints: breakdown ? breakdown.points : null,
     exactHit: breakdown ? breakdown.exact : false,
+    // En seco no hay clasificacion de LaLiga que consultar, asi que no hay
+    // racha: vacias, nunca inventadas.
+    homeForm: [],
+    awayForm: [],
   }
 }
 

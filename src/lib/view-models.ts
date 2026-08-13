@@ -25,6 +25,17 @@ export type MatchRowVM = {
   result: MatchResult | null
   myPoints: number | null    // null si el partido no esta jugado
   exactHit: boolean          // marcador propio identico al real
+  /**
+   * Racha del equipo en LaLiga, de `competition_standings` (migracion 0015).
+   * NO sale de nuestros `matches`: la racha es de la competicion entera y
+   * nuestro calendario solo tiene los partidos que la peña pronostica.
+   *
+   * VACIOS cuando no hay dato, que hoy es el caso normal: hasta que se juegue la
+   * primera jornada la API manda `form: null` para los 20 equipos. Una fila sin
+   * racha no pinta nada; nunca se inventa una W.
+   */
+  homeForm: Array<'W' | 'D' | 'L'>
+  awayForm: Array<'W' | 'D' | 'L'>
 }
 
 export type GameweekVM = {
@@ -200,3 +211,76 @@ export type MatchLineupsVM = {
  * una plantilla, su version manda.
  */
 export type AdminSquadVM = { code: TeamCode; players: string[]; source: 'api' | 'admin' }
+
+/* ------------------------------------------------------------------ *
+ * LaLiga de verdad (no la peña)
+ *
+ * Estos cuatro salen de `competition_standings` y `competition_scorers`
+ * (migracion 0015), que llena el cron desde football-data.org. Son datos
+ * PUBLICOS de la competicion: no dependen de en que peña estes.
+ *
+ * `updatedAt` es `null` cuando no hay ni una fila guardada, y las funciones que
+ * los devuelven NO LANZAN NUNCA: sin ingesta todavia, `rows: []`. Una pantalla
+ * de ayuda que reviente se lleva por delante la pantalla de pronostico, que es
+ * la que de verdad hace falta el sabado a las 19:30.
+ * ------------------------------------------------------------------ */
+
+/**
+ * Una fila de la clasificacion real de LaLiga.
+ *
+ * `form` va del partido mas antiguo al mas reciente, tal como lo manda la API, y
+ * puede estar VACIO: hasta la primera jornada no hay racha que contar.
+ * La diferencia de goles no viaja aqui a proposito: es `goalsFor - goalsAgainst`
+ * y guardar un tercer numero que puede contradecir a los otros dos solo da
+ * ocasiones de que se contradigan.
+ */
+export type TeamFormVM = {
+  code: TeamCode
+  position: number
+  points: number
+  playedGames: number
+  goalsFor: number
+  goalsAgainst: number
+  form: Array<'W' | 'D' | 'L'>
+}
+
+export type CompetitionStandingsVM = { updatedAt: string | null; rows: TeamFormVM[] }
+
+/**
+ * Un maximo goleador.
+ *
+ * `teamCode` es `null` cuando su club no es uno de nuestros 20: se muestra el
+ * goleador igual (su nombre y sus goles son la ayuda que se pidio) pero sin
+ * escudo, porque adivinar el equipo es como acabas metiendo al Mallorca en la
+ * fila del Malaga. `assists` a `null` significa "la API no lo da", que NO es
+ * cero: la interfaz pinta un hueco, no un 0.
+ */
+export type TopScorerVM = {
+  name: string
+  teamCode: TeamCode | null
+  goals: number
+  assists: number | null
+}
+
+export type TopScorersVM = { updatedAt: string | null; rows: TopScorerVM[] }
+
+/**
+ * Mi cara a cara contra cada companero de peña.
+ *
+ * No necesita ninguna API: sale de `gameweek_points` y `prediction_points`, que
+ * ya existen. `wins`/`draws`/`losses` se cuentan por JORNADA (cuantas le he
+ * ganado, empatado y perdido), no por partido; `pointsFor`/`pointsAgainst` son
+ * los puntos acumulados de los dos en las jornadas que se han comparado.
+ */
+export type HeadToHeadVM = {
+  rows: Array<{
+    memberId: string
+    displayName: string
+    avatarColor: string
+    wins: number
+    draws: number
+    losses: number
+    pointsFor: number
+    pointsAgainst: number
+  }>
+}

@@ -51,5 +51,27 @@ export type { MatchSquad } from './squads'
  */
 export { getMatchLineups } from './lineups'
 
+/**
+ * El cara a cara de la peña. No consulta ninguna API: compara, jornada a
+ * jornada, mis puntos de `gameweek_points` con los de cada companero. Sin
+ * ninguna jornada terminada devuelve `rows: []`, que es lo que hay hasta que se
+ * juegue la primera.
+ */
+export { getHeadToHead } from './head-to-head'
+
+/**
+ * LaLiga de verdad, no la peña. Salen de `competition_standings` y
+ * `competition_scorers` (migracion 0015), que llena el cron desde
+ * football-data.org: estas dos NO llaman a la API.
+ *
+ * NO LANZAN NUNCA y no devuelven `null`: sin nada guardado, `rows: []` y
+ * `updatedAt: null`. La racha de la fila de partido cuelga de la primera y los
+ * goleadores se piden desde la pantalla de pronostico; que una ayuda que falta
+ * tumbara esa pantalla seria mucho peor que no tener la ayuda.
+ *
+ * `getTopScorers()` sin argumento devuelve 10 (la ingesta guarda 30).
+ */
+export { getCompetitionStandings, getTopScorers } from './competition'
+
 /** Hay backend pero quien pregunta no es miembro: lo lanzan las 9 funciones. */
 export { NoMemberError } from './league'

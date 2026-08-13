@@ -55,8 +55,66 @@ const SURFACE: Record<RowVariant, string> = {
   played: 'border-line bg-card',
 }
 
+type FormMark = 'W' | 'D' | 'L'
+
+/** Solo los tres tonos que ya existen: verde gana, gris empata, rojo pierde. */
+const FORM_TONE: Record<FormMark, string> = {
+  W: 'bg-ok',
+  D: 'bg-txt3',
+  L: 'bg-bad',
+}
+
+const FORM_WORD: Record<FormMark, string> = {
+  W: 'victoria',
+  D: 'empate',
+  L: 'derrota',
+}
+
+/**
+ * Los ultimos cinco de un equipo, en puntos de 7px.
+ *
+ * Puntos y no letras porque "V E D V V" no cabe en esta fila sin comerse el
+ * nombre del equipo: la fila ya lleva distintivo, nombre y marcador. Van pegados
+ * al borde derecho de la columna (`ml-auto`), asi los dos equipos quedan en
+ * vertical y se comparan de un vistazo.
+ *
+ * SIN RACHA NO SE PINTA NADA. Ni huecos ni guiones: hoy, con la temporada sin
+ * empezar, seria una rejilla de veinte huecos vacios en cada jornada.
+ */
+function FormStrip({ form, teamName }: { form: FormMark[]; teamName: string }) {
+  // `Array.isArray` y no `form.slice()` a secas: si algun dia una fila llega sin
+  // el campo (mock a medias, fila cacheada de antes), la jornada entera de los
+  // doce se queda en blanco por un `.slice of undefined`. Aqui simplemente no se
+  // pinta la racha.
+  //
+  // `slice(-5)`, no `slice(0, 5)`: `form` va del partido MAS ANTIGUO al mas
+  // reciente (lo documenta `TeamFormVM`), asi que si algun dia llegaran mas de
+  // cinco hay que quedarse con los ultimos, no con los primeros.
+  const marks = Array.isArray(form) ? form.slice(-5) : []
+  if (marks.length === 0) return null
+
+  return (
+    <span
+      role="img"
+      // El orden importa y unos puntos de colores no lo dicen: se nombra.
+      aria-label={`Racha de ${teamName}, de lo más antiguo a lo más reciente: ${marks
+        .map((mark) => FORM_WORD[mark])
+        .join(', ')}`}
+      className="ml-auto flex flex-none items-center gap-[3px]"
+    >
+      {marks.map((mark, i) => (
+        <span
+          key={i}
+          aria-hidden
+          className={cn('block size-[7px] rounded-full', FORM_TONE[mark])}
+        />
+      ))}
+    </span>
+  )
+}
+
 /** El circulo baja de 26 a 22 px y el nombre de 14.5 a 13 px en la rejilla de escritorio. */
-function TeamLine({ team, dimmed }: { team: TeamVM; dimmed: boolean }) {
+function TeamLine({ team, dimmed, form }: { team: TeamVM; dimmed: boolean; form: FormMark[] }) {
   return (
     <span className="flex min-w-0 items-center gap-[9px] lg:gap-[8px]">
       <span className="flex-none lg:hidden">
@@ -73,6 +131,7 @@ function TeamLine({ team, dimmed }: { team: TeamVM; dimmed: boolean }) {
       >
         {team.name}
       </span>
+      <FormStrip form={form} teamName={team.name} />
     </span>
   )
 }
@@ -224,8 +283,8 @@ export function MatchRow({ match }: MatchRowProps) {
 
       <span className="flex items-center gap-[10px] px-[13px] pt-[2px] pb-[13px]">
         <span className="flex min-w-0 flex-1 flex-col gap-[7px] lg:gap-[6px]">
-          <TeamLine team={match.home} dimmed={variant === 'locked'} />
-          <TeamLine team={match.away} dimmed={variant === 'locked'} />
+          <TeamLine team={match.home} dimmed={variant === 'locked'} form={match.homeForm} />
+          <TeamLine team={match.away} dimmed={variant === 'locked'} form={match.awayForm} />
         </span>
         <span className="flex flex-none items-center gap-[9px]">
           <Tail match={match} variant={variant} />

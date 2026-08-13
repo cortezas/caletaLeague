@@ -17,8 +17,9 @@
 import { formatKickoff, scoreLabel } from '../format'
 import { COMPETITION_LABEL } from '../laliga'
 import { normalizePlayer, samePlayer } from '../squads'
-import type { Prediction } from '../types'
+import type { Prediction, TeamCode } from '../types'
 import type { GameweekVM, MatchRowVM, PiqueVM, PredictEditorVM, SummaryVM } from '../view-models'
+import { getCompetitionStandings } from './competition'
 import {
   effectiveStatus,
   fetchMatchRow,
@@ -118,11 +119,29 @@ async function fetchPoints(
  * 2. Fila de partido
  * ------------------------------------------------------------------ */
 
+/** Las ultimas cinco de cada equipo, por sigla. */
+type FormByTeam = Map<TeamCode, MatchRowVM['homeForm']>
+
+/**
+ * La racha sale de la clasificacion real de LaLiga que guarda la ingesta, no de
+ * nuestros `matches`: nuestro calendario solo tiene los partidos de la peña y la
+ * racha es de LaLiga entera.
+ *
+ * `getCompetitionStandings()` no lanza nunca (contrato de `data/index.ts`): sin
+ * clasificacion guardada devuelve `rows: []`, el mapa sale vacio y cada fila se
+ * pinta sin racha. Que es justo lo que toca hoy, con la temporada sin empezar.
+ */
+async function fetchTeamForms(): Promise<FormByTeam> {
+  const standings = await getCompetitionStandings()
+  return new Map(standings.rows.map((team) => [team.code, team.form]))
+}
+
 function matchRowVM(
   row: MatchRow,
   prediction: Prediction | null,
   points: PointsRow | undefined,
   now: number,
+  forms: FormByTeam,
 ): MatchRowVM {
   const status = effectiveStatus(row, now)
   const result = resultOf(row, now)
@@ -140,6 +159,9 @@ function matchRowVM(
     result,
     myPoints: scored ? points.points : null,
     exactHit: scored ? points.exact_hit === true : false,
+    // Vacios cuando el equipo aun no tiene racha: la fila entonces no pinta nada.
+    homeForm: forms.get(row.home_code) ?? [],
+    awayForm: forms.get(row.away_code) ?? [],
   }
 }
 
@@ -151,9 +173,10 @@ async function myGameweekRows(
   const matches = await fetchMatchRows(ctx, gameweekId)
   const ids = matches.map((m) => m.id)
 
-  const [predictions, points] = await Promise.all([
+  const [predictions, points, forms] = await Promise.all([
     fetchPredictions(ctx, ids, ctx.memberId),
     fetchPoints(ctx, ids, ctx.memberId),
+    fetchTeamForms(),
   ])
 
   const byMatch = new Map(predictions.map((p) => [p.match_id, predictionOf(p)]))
@@ -162,7 +185,7 @@ async function myGameweekRows(
   return {
     matches,
     rows: matches.map((row) =>
-      matchRowVM(row, byMatch.get(row.id) ?? null, pointsByMatch.get(row.id), ctx.now),
+      matchRowVM(row, byMatch.get(row.id) ?? null, pointsByMatch.get(row.id), ctx.now, forms),
     ),
   }
 }
@@ -323,15 +346,16 @@ export async function getMatchEditor(matchId: string): Promise<PredictEditorVM |
   const row = await fetchMatchRow(ctx, matchId)
   if (!row) return null
 
-  const [predictions, points, squads, suggestions] = await Promise.all([
+  const [predictions, points, squads, suggestions, forms] = await Promise.all([
     fetchPredictions(ctx, [row.id], ctx.memberId),
     fetchPoints(ctx, [row.id], ctx.memberId),
     getSquadsForMatch(row.home_code, row.away_code),
     getUsedPlayerNames(),
+    fetchTeamForms(),
   ])
 
   const mine = predictions.length > 0 ? predictionOf(predictions[0]) : null
-  const match = matchRowVM(row, mine, points[0], ctx.now)
+  const match = matchRowVM(row, mine, points[0], ctx.now, forms)
 
   return {
     match,
@@ -361,9 +385,10 @@ export async function getMatchPique(matchId: string): Promise<PiqueVM | null> {
   const result = resultOf(row, ctx.now)
   if (!result) return null
 
-  const [predictions, points] = await Promise.all([
+  const [predictions, points, forms] = await Promise.all([
     fetchPredictions(ctx, [row.id]),
     fetchPoints(ctx, [row.id]),
+    fetchTeamForms(),
   ])
 
   const pointsByMember = new Map(points.map((p) => [p.member_id, p]))
@@ -523,6 +548,7 @@ export async function getMatchPique(matchId: string): Promise<PiqueVM | null> {
       mine ? predictionOf(mine) : null,
       pointsByMember.get(ctx.memberId),
       ctx.now,
+      forms,
     ),
     highlights,
     rows,

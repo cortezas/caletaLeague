@@ -1,26 +1,30 @@
 /**
  * `POST /api/sync` - dispara la ingesta.
  *
- * Cuatro pasos, dos proveedores y dos cuotas muy distintas:
+ * Cinco pasos, dos proveedores y dos cuotas muy distintas:
  *   1. partidos, jornadas, horarios y marcadores (`syncMatches`, football-data.org);
  *   2. plantillas de los 20 equipos (`syncSquads`, football-data.org), que se
  *      pueden saltar con `?squads=0` en las pasadas frecuentes de dia de partido;
- *   3. goleadores y asistencias (`syncMatchEvents`, Highlightly), que se pueden
- *      saltar con `?events=0`;
- *   4. alineaciones de lo que arranca en los proximos 90 minutos (`syncLineups`,
+ *   3. clasificacion de LaLiga y maximos goleadores (`syncCompetition`,
+ *      football-data.org), que se pueden saltar con `?competition=0`;
+ *   4. goleadores y asistencias por partido (`syncMatchEvents`, Highlightly), que
+ *      se pueden saltar con `?events=0`;
+ *   5. alineaciones de lo que arranca en los proximos 90 minutos (`syncLineups`,
  *      Highlightly), que se pueden saltar con `?lineups=0`.
  *
  * El paso 1 es el imprescindible: sin el no hay calendario y no se puede jugar.
- * Los pasos 2, 3 y 4 son SUBORDINADOS y no lanzan NUNCA: devuelven su fallo
- * dentro del informe (`squads` / `events` / `lineups`) y la sincronizacion de
- * partidos se da por buena igual.
+ * Los pasos 2, 3, 4 y 5 son SUBORDINADOS y no lanzan NUNCA: devuelven su fallo
+ * dentro del informe (`squads` / `competition` / `events` / `lineups`) y la
+ * sincronizacion de partidos se da por buena igual.
  *
  * CUOTAS, que no son la misma:
- *   - football-data.org: 10 peticiones por MINUTO. Los pasos 1 y 2 gastan 1 cada uno.
- *   - Highlightly:      100 peticiones al DIA, COMPARTIDAS entre los pasos 3 y 4.
- *     El paso 3 gasta 1 por dia de partido consultado mas 1 por partido terminado
+ *   - football-data.org: 10 peticiones por MINUTO. Los pasos 1 y 2 gastan 1 cada
+ *     uno y el paso 3 gasta 2 (clasificacion y goleadores son dos endpoints):
+ *     4 de 10 con todo encendido, asi que aqui no hay presupuesto que repartir.
+ *   - Highlightly:      100 peticiones al DIA, COMPARTIDAS entre los pasos 4 y 5.
+ *     El paso 4 gasta 1 por dia de partido consultado mas 1 por partido terminado
  *     pendiente, con un tope por pasada (`?maxRequests=`, 40 por defecto). El
- *     paso 4 gasta 1 por dia mas 1 por partido de la ventana sin alineacion, con
+ *     paso 5 gasta 1 por dia mas 1 por partido de la ventana sin alineacion, con
  *     un tope propio de 12. Desglose en docs/EVENTOS.md y en `syncLineups`.
  *
  * POR QUE LAS ALINEACIONES LAS PIDE EL CRON Y NO LA PANTALLA: doce personas
@@ -45,6 +49,7 @@ import { timingSafeEqual } from 'node:crypto'
 import { revalidatePath } from 'next/cache'
 
 import { isFootballDataConfigured, FootballDataError } from '@/lib/football-data/client'
+import { syncCompetition, type CompetitionSyncReport } from '@/lib/football-data/competition'
 import { syncMatches, type SyncReport } from '@/lib/football-data/ingest'
 import { syncSquads, type SquadSyncReport } from '@/lib/football-data/squads'
 import { syncMatchEvents, type EventsSyncReport } from '@/lib/highlightly/events'
@@ -76,6 +81,7 @@ function secretMatches(provided: string, expected: string): boolean {
 function revalidateIfChanged(
   report: SyncReport,
   squads: SquadSyncReport | null,
+  competition: CompetitionSyncReport | null,
   events: EventsSyncReport | null,
   lineups: LineupsSyncReport | null,
 ): void {
@@ -89,6 +95,14 @@ function revalidateIfChanged(
     // Un goleador nuevo cambia los puntos de todo el mundo: si no se invalida,
     // la clasificacion se sirve cacheada y el cron parece no hacer nada.
     (events?.written ?? 0) > 0 ||
+    // La clasificacion cambia la pestaña de LaLiga y, sobre todo, la RACHA que
+    // se pinta en cada fila de partido de /jornada. Los goleadores alimentan la
+    // ayuda de la pantalla de pronostico. Cuenta tambien el borrado: una foto
+    // nueva sin filas (o con un equipo menos) tambien cambia lo que se ve.
+    (competition?.standingsWritten ?? 0) > 0 ||
+    (competition?.standingsRemoved ?? 0) > 0 ||
+    (competition?.scorersWritten ?? 0) > 0 ||
+    (competition?.scorersRemoved ?? 0) > 0 ||
     // Una alineacion recien guardada tiene que verse YA: llega una hora antes
     // del partido, que es justo la ventana en la que aun se puede cambiar el
     // pronostico. La pagina del partido es dinamica (lee cookies) y no se
@@ -156,6 +170,10 @@ export async function POST(request: Request) {
   // cada diez minutos: en las pasadas de dia de partido se pide `?squads=0` y la
   // ingesta gasta 1 peticion en vez de 2.
   const withSquads = url.searchParams.get('squads') !== '0'
+  // Clasificacion y goleadores de LaLiga. Son 2 peticiones a football-data (10
+  // por MINUTO), asi que no hay razon de cuota para apagarlo; `?competition=0`
+  // esta por simetria con los demas pasos y para aislarlo si un dia da guerra.
+  const withCompetition = url.searchParams.get('competition') !== '0'
   // Goleadores y asistencias. Se puede apagar con `?events=0` para una pasada que
   // solo quiera refrescar horarios sin tocar la cuota diaria de Highlightly.
   const withEvents = url.searchParams.get('events') !== '0'
@@ -184,24 +202,31 @@ export async function POST(request: Request) {
       ? await syncSquads({ leagueId: report.leagueId, allowSeasonMismatch })
       : null
 
-    // Tercer paso, OTRO proveedor y OTRA cuota (100/dia). Va DESPUES de los
+    // Tercer paso, MISMO proveedor y misma cuota por minuto: 2 peticiones mas
+    // (clasificacion y goleadores), 4 de 10 en total. No depende de nada de lo
+    // anterior (estas dos tablas no llevan `league_id`: son datos publicos de
+    // LaLiga, iguales para cualquier peña) y tampoco lanza nunca: su fallo viaja
+    // dentro de `competition` y la sincronizacion de partidos se da por buena.
+    const competition = withCompetition ? await syncCompetition() : null
+
+    // Cuarto paso, OTRO proveedor y OTRA cuota (100/dia). Va DESPUES de los
     // marcadores a proposito: para saber que partidos estan jugados y con que
     // resultado hay que haberlos escrito antes; el marcador es lo que cuadra los
     // goleadores. `syncMatchEvents` tampoco lanza nunca: si falta la clave o la
     // API se cae, el aviso viaja dentro de `events` con `skipped: true`.
     const events = withEvents ? await syncMatchEvents({ leagueId: report.leagueId, maxRequests }) : null
 
-    // Cuarto paso, mismo proveedor y misma cuota diaria que el tercero. Va el
+    // Quinto paso, mismo proveedor y misma cuota diaria que el cuarto. Va el
     // ULTIMO a proposito: mira `matches.kickoff_at`, que el paso 1 acaba de
     // actualizar, y con un horario movido la ventana de 90 minutos seria otra.
-    // NO comparte el `maxRequests` del paso 3: ese tope se reparte entre partidos
+    // NO comparte el `maxRequests` del paso 4: ese tope se reparte entre partidos
     // ya jugados, y estas son las que estan a punto de empezar; que un recuperado
     // de goleadores se coma el presupuesto dejaria a la peña sin el once justo
     // cuando aun podia cambiar el pronostico. Tampoco lanza nunca.
     const lineups = withLineups ? await syncLineups({ leagueId: report.leagueId }) : null
 
-    revalidateIfChanged(report, squads, events, lineups)
-    return Response.json({ ...report, squads, events, lineups }, { status: 200 })
+    revalidateIfChanged(report, squads, competition, events, lineups)
+    return Response.json({ ...report, squads, competition, events, lineups }, { status: 200 })
   } catch (error) {
     if (error instanceof FootballDataError) {
       // 429 y 5xx son transitorios: se devuelve 503 para que el cron reintente,

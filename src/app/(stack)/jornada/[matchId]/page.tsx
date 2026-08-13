@@ -5,8 +5,16 @@ import { LineupPoller } from '@/features/lineups/lineup-poller'
 import { LineupSection } from '@/features/lineups/lineup-section'
 import { PredictionForm } from '@/features/predict/prediction-form'
 import { SealedCard } from '@/features/predict/sealed-card'
+import { TopScorers } from '@/features/scorers/top-scorers'
 import { requireMember } from '@/lib/auth'
-import { getActiveGameweek, getMatchEditor, getMatchLineups } from '@/lib/data'
+import { getActiveGameweek, getMatchEditor, getMatchLineups, getTopScorers } from '@/lib/data'
+
+/**
+ * Veinte y no diez: es aproximadamente un jugador por club, asi que casi siempre
+ * cae alguno de los dos equipos de ESTE partido, que es lo unico que hace util a
+ * la lista aqui. Con diez, la mitad de los partidos la abririan para nada.
+ */
+const TOP_SCORERS_LIMIT = 20
 
 /**
  * Pantallas 4 y 4b.
@@ -23,10 +31,13 @@ export default async function PredictPage({ params }: { params: Promise<{ matchI
   // El numero de jornada no esta en PredictEditorVM y el subtitulo lo necesita.
   // Las alineaciones salen de nuestra base, no de la API: pedirlas aqui no gasta
   // ninguna peticion del plan gratuito aunque entren los doce a la vez.
-  const [editor, gameweek, lineups] = await Promise.all([
+  // Los goleadores tampoco salen de la API en vivo: es una tabla nuestra que
+  // rellena la ingesta, asi que abrir el partido no gasta peticiones.
+  const [editor, gameweek, lineups, scorers] = await Promise.all([
     getMatchEditor(matchId),
     getActiveGameweek(),
     getMatchLineups(matchId),
+    getTopScorers(TOP_SCORERS_LIMIT),
   ])
   if (!editor) notFound()
 
@@ -48,6 +59,15 @@ export default async function PredictPage({ params }: { params: Promise<{ matchI
               al final para su barra fija de guardar, asi que ese hueco se sube
               aqui y se vuelve a reservar al final, que es donde acaba la pantalla. */}
           <div className="-mt-[calc(env(safe-area-inset-bottom)+118px)] px-[14px] pb-[calc(env(safe-area-inset-bottom)+132px)]">
+            {/* Entre los selectores y las alineaciones a proposito: es la ayuda
+                para ELEGIR goleador, asi que va pegada debajo de donde se
+                eligen, no al final de la pantalla. */}
+            <TopScorers
+              scorers={scorers}
+              home={match.home}
+              away={match.away}
+              className="mb-[14px]"
+            />
             <LineupSection
               lineups={lineups}
               home={match.home}
