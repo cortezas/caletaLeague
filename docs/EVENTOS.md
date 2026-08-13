@@ -142,8 +142,16 @@ Dos frecuencias distintas en `.github/workflows/cron.yml`:
 
 | Pasada | Qué llama | Para qué |
 | --- | --- | --- |
-| cada 15 min | `/api/sync?squads=0&events=0` | alineaciones: seis oportunidades por partido en vez de dos |
-| cada hora (min. 7) | `/api/sync` | calendario, marcadores, plantillas y goleadores |
+| `*/15` | `/api/sync?squads=0&events=0` | alineaciones |
+| `7 * * * *` | `/api/sync` | calendario, marcadores, plantillas y goleadores |
+
+**`*/15` no es cada 15 minutos.** Medido sobre las 58 pasadas programadas del 11
+al 13 de agosto de 2026, GitHub Actions disparó **una cada 42 minutos de media**
+(mediana 35, mínimo 1, **máximo 156**). Dentro de la ventana de 90 minutos eso da
+2 o 3 intentos, no seis, y un hueco malo puede saltársela entera. Mejora los 2
+intentos fijos que había antes, pero **no es una garantía**: si la peña ve "aún no
+disponibles" con el partido a punto de empezar, lo primero que hay que mirar es la
+pestaña Actions, no la app.
 
 Gasto de Highlightly por jornada: ~6 peticiones por horario de partido, ~24 en un
 sábado de cuatro horarios, ~50 repartidas en tres días. La cuota son 100 **al

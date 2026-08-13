@@ -58,9 +58,18 @@ jobs:
         # no a una hora clavada: para un partido de las 19:30 pueden aparecer a
         # las 18:35 o a las 19:15. `syncLineups` solo pide las de lo que arranca
         # en los proximos 90 minutos, asi que con la ingesta SOLO horaria un
-        # partido de las 19:30 tenia dos oportunidades (18:07 y 19:07) y una
-        # alineacion publicada a las 19:15 no se llegaba a pedir nunca. Cada 15
-        # minutos son seis.
+        # partido de las 19:30 tenia dos intentos (18:07 y 19:07) y una
+        # alineacion publicada a las 19:15 no se llegaba a pedir nunca.
+        #
+        # CUANTOS INTENTOS DA ESTO DE VERDAD (medido, no supuesto)
+        # `*/15` NO significa cada 15 minutos. Sobre las 58 pasadas programadas
+        # del 11 al 13 de agosto de 2026, GitHub disparo una cada 42 minutos de
+        # media (mediana 35, minimo 1, MAXIMO 156). En la ventana de 90 minutos
+        # eso son 2 o 3 intentos tipicos, no seis, y un hueco malo puede
+        # saltarsela entera. Sigue siendo mejor que los 2 fijos de antes, pero no
+        # es una garantia: si el sabado la peña ve "aun no disponibles" con el
+        # partido a punto de empezar, la causa mas probable es esta, no un fallo
+        # de la app. Se comprueba en la pestaña Actions.
         #
         # POR QUE NO GASTA CUOTA
         # `squads=0` se salta las plantillas (1 peticion a football-data que no
