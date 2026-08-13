@@ -31,8 +31,14 @@ import { TEAMS } from '../laliga'
 import { createClient, isSupabaseConfigured } from '../supabase/server'
 import { DEFAULT_SCORING } from '../types'
 import type { MatchResult, MatchStatus, Scoring, TeamCode } from '../types'
-import type { AdminMatchVM, AdminSquadVM, LeagueSettingsVM, TeamVM } from '../view-models'
-import { mockGetAdminMatches, mockGetLeagueSettings } from './mock'
+import type {
+  AdminGameweekVM,
+  AdminMatchVM,
+  AdminSquadVM,
+  LeagueSettingsVM,
+  TeamVM,
+} from '../view-models'
+import { mockGetActiveGameweek, mockGetGameweek, mockGetLeagueSettings } from './mock'
 
 /* ------------------------------------------------------------------ *
  * 1. Contexto de la peticion
@@ -404,6 +410,12 @@ export const getAdminSquads = cache(async (): Promise<AdminSquadVM[]> => {
  * ------------------------------------------------------------------ */
 
 /**
+ * Lo minimo para saber el estado: asi lo puede llamar tambien la consulta
+ * recortada del panel de organizador, que no trae la fila entera.
+ */
+type StatusInput = Pick<MatchRow, 'status' | 'kickoff_at'>
+
+/**
  * El estado que se pinta.
  *
  * `matches.status` esta materializado y lo mueve la ingesta o el admin, asi que
@@ -416,9 +428,27 @@ export const getAdminSquads = cache(async (): Promise<AdminSquadVM[]> => {
  * 'live' y 'played' no se tocan: esos SI son informacion que solo tiene la
  * ingesta y que el reloj no puede deducir.
  */
-export function effectiveStatus(row: MatchRow, now: number): MatchStatus {
+export function effectiveStatus(row: StatusInput, now: number): MatchStatus {
   if (row.status === 'live' || row.status === 'played') return row.status
   return Date.parse(row.kickoff_at) > now ? 'open' : 'locked'
+}
+
+/**
+ * Lo que el organizador tiene PENDIENTE de rellenar en un partido. La regla vive
+ * aqui una sola vez y se llama con el estado ya calculado, tanto desde la fila
+ * cruda (para elegir jornada) como desde el VM ya montado (para contar).
+ *
+ *  - 'played' sin MVP: el marcador lo trae la API y `matches_result_complete`
+ *    garantiza que un partido jugado SIEMPRE tiene marcador, pero el MVP, los
+ *    goleadores y los asistentes los mete el organizador a mano.
+ *  - 'locked': el pitido inicial ya paso y en la base no hay resultado ninguno,
+ *    o sea que la ingesta aun no lo ha traido. Tambien es cosa suya.
+ *
+ * 'live' NO cuenta: el partido se esta jugando y todavia no hay nada que meter.
+ */
+export function isMatchPending(status: MatchStatus, mvp: string | null): boolean {
+  if (status === 'played') return (mvp ?? '').trim() === ''
+  return status === 'locked'
 }
 
 /** Resultado real, o `null` si el partido no esta jugado. */
@@ -478,19 +508,120 @@ export async function getLeagueSettings(): Promise<LeagueSettingsVM> {
   }
 }
 
-export async function getAdminMatches(): Promise<AdminMatchVM[]> {
+/** Una peña sin calendario sembrado. El panel abre igual: hay dos pestañas mas. */
+const EMPTY_ADMIN_GAMEWEEK: AdminGameweekVM = {
+  number: 0,
+  matches: [],
+  hasPrev: false,
+  hasNext: false,
+  prevNumber: null,
+  nextNumber: null,
+  isDefault: true,
+  pendingCount: 0,
+}
+
+type AdminNav = Pick<AdminGameweekVM, 'hasPrev' | 'hasNext' | 'prevNumber' | 'nextNumber'>
+
+/**
+ * Las vecinas dentro de las jornadas que SI existen en la liga. Nada de 1 y 38
+ * cableados, igual que en `/jornada`: una peña con medio calendario sembrado
+ * tendria flechas que no llevan a ninguna parte.
+ */
+function navOf(gameweeks: GameweekRow[], index: number): AdminNav {
+  const prev = index > 0 ? gameweeks[index - 1] : null
+  const next = index >= 0 && index < gameweeks.length - 1 ? gameweeks[index + 1] : null
+  return {
+    hasPrev: prev !== null,
+    hasNext: next !== null,
+    prevNumber: prev?.number ?? null,
+    nextNumber: next?.number ?? null,
+  }
+}
+
+/**
+ * La jornada por defecto DEL PANEL: la mas antigua que tenga algo pendiente de
+ * rellenar (ver `isMatchPending`). `null` si no hay ninguna.
+ *
+ * POR QUE NO VALE `pickDefaultGameweek`
+ * Esa elige la que se CIERRA antes, que es lo que quiere quien pronostica: lo
+ * que viene. El organizador quiere lo contrario, lo que ya paso y le falta por
+ * meter. El 21 de agosto la de cierre mas proximo es la 2 (se juega entera del
+ * 20 al 24, dentro de la 1) y el organizador estaria mirando partidos sin jugar
+ * mientras la 1, jugada el 15 y el 16, sigue esperando su MVP.
+ *
+ * Pura a proposito, igual que `pickDefaultGameweek`: se puede comprobar contra
+ * el calendario real sin levantar Supabase.
+ */
+export function pickAdminGameweek(
+  gameweeks: GameweekRow[],
+  matches: Array<StatusInput & { gameweek_id: string; real_mvp: string | null }>,
+  now: number,
+): GameweekRow | null {
+  const byId = new Map(gameweeks.map((gw) => [gw.id, gw]))
+
+  let oldest: GameweekRow | null = null
+  for (const row of matches) {
+    const gw = byId.get(row.gameweek_id)
+    if (!gw) continue
+    if (!isMatchPending(effectiveStatus(row, now), row.real_mvp)) continue
+    if (!oldest || gw.number < oldest.number) oldest = gw
+  }
+
+  return oldest
+}
+
+/** La jornada pendiente de MI liga. Ver `pickAdminGameweek` para el criterio. */
+export const resolveAdminGameweek = cache(async (): Promise<GameweekRow | null> => {
   const ctx = await getDataContext()
-  if (!ctx) return mockGetAdminMatches()
+  if (!ctx) return null
 
-  const active = await resolveActiveGameweek()
-  if (!active) return []
+  const gameweeks = await getLeagueGameweeks()
+  if (gameweeks.length === 0) return null
 
-  const [rows, squads] = await Promise.all([
-    fetchMatchRows(ctx, active.id),
-    getLeagueSquads(),
-  ])
+  const { data, error } = await ctx.supabase
+    .from('matches')
+    .select('gameweek_id, kickoff_at, status, real_mvp, gameweeks!inner(league_id)')
+    .eq('gameweeks.league_id', ctx.leagueId)
+  if (error) throw error
 
-  return rows.map((row) => {
+  const rows = (data ?? []) as unknown as Array<
+    StatusInput & { gameweek_id: string; real_mvp: string | null }
+  >
+  return pickAdminGameweek(gameweeks, rows, ctx.now)
+})
+
+/** Lo mismo que `isMatchPending`, pero sobre el VM ya montado. */
+function pendingCountOf(matches: AdminMatchVM[]): number {
+  return matches.filter((match) => isMatchPending(match.status, match.result?.mvp ?? null)).length
+}
+
+/**
+ * Los partidos que el organizador rellena, con su navegacion de jornadas.
+ *
+ * Con numero, esa jornada; `null` si no existe en la liga y la pantalla hace
+ * `notFound()`. Sin numero, la jornada PENDIENTE (`pickAdminGameweek`) y, si no
+ * hay ninguna pendiente, la de siempre: la que se cierra antes.
+ */
+export async function getAdminMatches(n?: number): Promise<AdminGameweekVM | null> {
+  const ctx = await getDataContext()
+  if (!ctx) return mockAdminGameweek(n)
+
+  const gameweeks = await getLeagueGameweeks()
+  // La pendiente manda; sin nada pendiente se cae al criterio normal.
+  const fallback = (await resolveAdminGameweek()) ?? (await resolveActiveGameweek())
+
+  const index =
+    n === undefined
+      ? gameweeks.findIndex((gw) => gw.id === fallback?.id)
+      : gameweeks.findIndex((gw) => gw.number === n)
+  // Sin numero y sin jornada que elegir es que la peña no tiene calendario: eso
+  // no es un 404, es una pantalla vacia. Con numero si: ese `?j=` no existe.
+  if (index === -1) return n === undefined ? EMPTY_ADMIN_GAMEWEEK : null
+
+  const gameweek = gameweeks[index]
+  const [rows, squads] = await Promise.all([fetchMatchRows(ctx, gameweek.id), getLeagueSquads()])
+
+  const matches: AdminMatchVM[] = rows.map((row) => {
     const status = effectiveStatus(row, ctx.now)
     const result = resultOf(row, ctx.now)
     return {
@@ -502,4 +633,42 @@ export async function getAdminMatches(): Promise<AdminMatchVM[]> {
       players: [...(squads.get(row.home_code) ?? []), ...(squads.get(row.away_code) ?? [])],
     }
   })
+
+  return {
+    number: gameweek.number,
+    matches,
+    ...navOf(gameweeks, index),
+    isDefault: fallback?.id === gameweek.id,
+    pendingCount: pendingCountOf(matches),
+  }
+}
+
+/**
+ * El panel sin backend. Los partidos salen del mismo VM de jornada que usa
+ * /jornada para que el `?j=` tambien funcione en seco; `players` va vacio porque
+ * sin base de datos `squadOf()` no tiene plantillas que dar (ver `lib/squads.ts`).
+ */
+async function mockAdminGameweek(n?: number): Promise<AdminGameweekVM | null> {
+  const gameweek = n === undefined ? await mockGetActiveGameweek() : await mockGetGameweek(n)
+  if (!gameweek) return null
+
+  const matches: AdminMatchVM[] = gameweek.matches.map((row) => ({
+    id: row.id,
+    label: `${row.home.name} – ${row.away.name}`,
+    status: row.status,
+    result: row.result,
+    missingMvp: row.status === 'played' && !row.result?.mvp,
+    players: [],
+  }))
+
+  return {
+    number: gameweek.number,
+    matches,
+    hasPrev: gameweek.hasPrev,
+    hasNext: gameweek.hasNext,
+    prevNumber: gameweek.prevNumber,
+    nextNumber: gameweek.nextNumber,
+    isDefault: gameweek.isDefault,
+    pendingCount: pendingCountOf(matches),
+  }
 }

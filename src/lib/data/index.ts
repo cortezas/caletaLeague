@@ -26,6 +26,12 @@ export {
 } from './gameweek'
 export { getSeasonStandings, getGameweekStandings } from './standings'
 export { getProfile } from './profile'
+/**
+ * `getAdminMatches(n?)` es la unica que NO entra por la jornada por defecto de la
+ * peña: el organizador aterriza en la mas antigua que le falte por rellenar, no
+ * en la que se cierra antes. El criterio esta en `pickAdminGameweek`, y devuelve
+ * `null` (=> `notFound()`) cuando se le pide un numero que no existe.
+ */
 export { getLeagueSettings, getAdminMatches, getAdminSquads } from './league'
 
 /**

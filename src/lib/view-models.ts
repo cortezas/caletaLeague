@@ -140,6 +140,22 @@ export type LeagueSettingsVM = { leagueName: string; inviteCode: string; memberC
 export type AdminMatchVM = { id: string; label: string; status: MatchStatus; result: MatchResult | null; missingMvp: boolean; players: string[] }
 
 /**
+ * La jornada que rellena el organizador, con su navegacion.
+ *
+ * `isDefault` es false cuando se ha ido con `?j=` a una jornada distinta de la
+ * que el panel elige solo, que NO es la misma que la de /jornada: la de aqui es
+ * la mas antigua con algo pendiente (ver `pickAdminGameweek`), no la que cierra
+ * antes. `pendingCount` son los partidos de ESTA jornada sin MVP o sin resultado.
+ */
+export type AdminGameweekVM = {
+  number: number
+  matches: AdminMatchVM[]
+  hasPrev: boolean; hasNext: boolean; prevNumber: number | null; nextNumber: number | null
+  isDefault: boolean
+  pendingCount: number
+}
+
+/**
  * Una fila de `public.team_squads` para el panel de organizador. `source` es lo
  * unico que distingue "De la API" de "Corregida a mano": la ingesta escribe con
  * 'api' y NUNCA pisa una fila 'admin', asi que en cuanto el organizador corrige

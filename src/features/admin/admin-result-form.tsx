@@ -78,12 +78,21 @@ function statusChip(match: AdminMatchVM): { label: string; tone: ChipTone; alert
       : { label: 'Confirmado', tone: 'ok', alert: false }
   }
   if (match.status === 'live') return { label: 'En juego', tone: 'bad', alert: false }
-  if (match.status === 'locked') return { label: 'Cerrado', tone: 'neutral', alert: false }
+  // 'locked' es el pitido inicial ya pasado sin resultado en la base: la ingesta
+  // no lo ha traido. Se marca como pendiente porque es lo que el organizador
+  // tiene que resolver, aunque el partido acabe de empezar.
+  if (match.status === 'locked') {
+    return { label: 'Falta el resultado', tone: 'warn', alert: true }
+  }
   return { label: 'Abierto', tone: 'neutral', alert: false }
 }
 
 function placeholderFor(match: AdminMatchVM): string {
-  return match.status === 'live' ? 'Al acabar el partido' : 'Aún no ha empezado'
+  if (match.status === 'live') return 'Al acabar el partido'
+  // El marcador de un partido ya empezado lo trae la API, no se teclea aqui:
+  // hasta que llegue, el MVP y los goleadores no se pueden meter.
+  if (match.status === 'locked') return 'Esperando la sincronización'
+  return 'Aún no ha empezado'
 }
 
 const FIELD = 'min-h-[44px] rounded-[12px] border border-line2 bg-sunk'
