@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation'
 
 import { ScreenHeader } from '@/components/ui'
+import { LineupPoller } from '@/features/lineups/lineup-poller'
 import { LineupSection } from '@/features/lineups/lineup-section'
 import { PredictionForm } from '@/features/predict/prediction-form'
 import { SealedCard } from '@/features/predict/sealed-card'
@@ -52,6 +53,13 @@ export default async function PredictPage({ params }: { params: Promise<{ matchI
               home={match.home}
               away={match.away}
               kickoffAt={match.kickoffAt}
+            />
+            {/* El cron no es puntual: si la alineacion ya salio pero aun no la
+                tenemos, la pide quien abre el partido. No pinta nada. */}
+            <LineupPoller
+              matchId={match.id}
+              kickoffAt={match.kickoffAt}
+              available={lineups.available}
             />
           </div>
         </>
