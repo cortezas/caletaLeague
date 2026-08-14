@@ -9,7 +9,7 @@ const COPY = {
   expired: {
     title: 'Ese enlace ya no vale',
     description:
-      'Los enlaces de acceso caducan a la hora y solo se pueden usar una vez. Pide uno nuevo y entra desde el mismo móvil donde abres el correo.',
+      'Los enlaces de acceso caducan a las 24 horas y solo se pueden usar una vez. Pide uno nuevo y entra desde el mismo móvil donde abres el correo.',
   },
   invalid: {
     title: 'Enlace incompleto',
