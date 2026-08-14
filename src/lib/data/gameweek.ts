@@ -440,6 +440,7 @@ export async function getMatchPique(matchId: string): Promise<PiqueVM | null> {
           memberId: member.memberId,
           displayName: member.displayName,
           avatarColor: member.avatarColor,
+        avatarUrl: member.avatarUrl,
           isMe: member.memberId === ctx.memberId,
           home: prediction.home,
           away: prediction.away,

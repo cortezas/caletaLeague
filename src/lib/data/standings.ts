@@ -31,6 +31,7 @@ type StandingsRow = {
   member_id: string
   display_name: string
   avatar_color: string
+  avatar_url: string | null
   total_points: number
   position: number
 }
@@ -58,7 +59,7 @@ export async function getSeasonStandings(): Promise<StandingsVM> {
 
   const { data, error } = await ctx.supabase
     .from('standings')
-    .select('member_id, display_name, avatar_color, total_points, position')
+    .select('member_id, display_name, avatar_color, avatar_url, total_points, position')
     .eq('league_id', ctx.leagueId)
     .order('position', { ascending: true })
     .order('display_name', { ascending: true })
@@ -74,6 +75,7 @@ export async function getSeasonStandings(): Promise<StandingsVM> {
       memberId: row.member_id,
       displayName: row.display_name,
       avatarColor: row.avatar_color,
+      avatarUrl: row.avatar_url,
       points: row.total_points,
       trend: trend.get(row.member_id) ?? 0,
       isMe: row.member_id === ctx.memberId,
@@ -196,6 +198,7 @@ export async function getGameweekStandings(n: number): Promise<GameweekStandings
     memberId: member.memberId,
     displayName: member.displayName,
     avatarColor: member.avatarColor,
+        avatarUrl: member.avatarUrl,
     points: totalByMember.get(member.memberId) ?? 0,
     isMe: member.memberId === ctx.memberId,
     breakdown: playedMatches.map((row) => {

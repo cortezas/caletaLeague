@@ -64,6 +64,7 @@ export async function getProfile(): Promise<ProfileVM> {
   return {
     displayName: ctx.displayName,
     avatarColor: ctx.avatarColor,
+    avatarUrl: ctx.avatarUrl,
     position: standings?.position ?? ctx.members.length,
     memberCount: ctx.members.length,
     leagueName: ctx.leagueName,

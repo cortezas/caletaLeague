@@ -32,6 +32,8 @@ export interface Member {
   id: string
   displayName: string
   avatarColor: string
+  /** Foto de perfil. Opcional: los datos de demostracion nunca tienen. */
+  avatarUrl?: string | null
   isMe?: boolean
 }
 

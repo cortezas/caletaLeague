@@ -9,6 +9,8 @@ export interface AvatarProps {
   size: AvatarSize
   /** Anillo del podio: 1.o volt, 2.o #C9D3E0, 3.o #C98B4B. */
   ring?: string
+  /** Foto de perfil. Sin ella (lo normal al principio) quedan las iniciales. */
+  photoUrl?: string | null
   className?: string
 }
 
@@ -32,17 +34,33 @@ const SPECS: Record<AvatarSize, { font: number; weight: number; radius: string }
 }
 
 /**
- * Avatar de iniciales sobre color plano. No hay fotos en el producto.
+ * Iniciales sobre color plano y, si la hay, la foto encima.
+ *
+ * LA FOTO SE SUPERPONE, NO SUSTITUYE. Las iniciales y el color se pintan
+ * siempre debajo, y el `<img>` va encima en posicion absoluta. Eso da gratis
+ * tres cosas que un `if (foto) ... else ...` no da: mientras la imagen carga se
+ * ve el color de la persona en vez de un hueco gris, si el archivo se borro o
+ * la red falla quedan las iniciales en vez de un icono roto, y no hace falta
+ * `onError` (que obligaria a convertir esto en Client Component, y lo usan ocho
+ * pantallas que hoy son de servidor).
+ *
+ * `<img>` normal y no `next/image`: son caras de 256 px ya recortadas al subir.
+ * Pasar por el optimizador seria una peticion de servidor por avatar y por
+ * pantalla -- doce en la clasificacion -- para ahorrar unos kilobytes.
+ *
  * Va `aria-hidden`: el nombre del miembro se renderiza siempre al lado o debajo,
  * y anunciarlo dos veces solo entorpece.
  */
-export function Avatar({ name, color, size, ring, className }: AvatarProps) {
+export function Avatar({ name, color, size, ring, photoUrl, className }: AvatarProps) {
   const spec = SPECS[size]
 
   return (
     <span
       aria-hidden="true"
-      className={cn('inline-flex flex-none items-center justify-center font-num text-white', className)}
+      className={cn(
+        'relative inline-flex flex-none items-center justify-center overflow-hidden font-num text-white',
+        className,
+      )}
       style={{
         width: size,
         height: size,
@@ -56,6 +74,19 @@ export function Avatar({ name, color, size, ring, className }: AvatarProps) {
       }}
     >
       {initials(name)}
+      {photoUrl && (
+        // Son caras de 256 px ya recortadas al subir. `next/image` costaria una
+        // peticion al optimizador por avatar y por pantalla (doce en la
+        // clasificacion) para ahorrar unos kilobytes.
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={photoUrl}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          className="absolute inset-0 size-full object-cover"
+        />
+      )}
     </span>
   )
 }

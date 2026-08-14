@@ -1,6 +1,6 @@
 'use client'
 
-import { Pencil } from 'lucide-react'
+import { Camera, Pencil } from 'lucide-react'
 import { useActionState, useEffect, useState } from 'react'
 
 import { Avatar, Button, Card, SectionLabel, TextInput, useToast } from '@/components/ui'
@@ -16,10 +16,56 @@ const MAX_NAME = 24
 export interface EditProfileProps {
   displayName: string
   avatarColor: string
+  avatarUrl: string | null
   position: number
   memberCount: number
   leagueName: string
   totalPoints: number
+}
+
+/** Lado del cuadrado que se sube. El avatar mas grande de la app son 96 px. */
+const PHOTO_SIZE = 256
+
+/**
+ * Reduce la foto elegida a un cuadrado de 256 px y la devuelve como data URL.
+ *
+ * SE HACE AQUI, EN EL MOVIL, Y NO EN EL SERVIDOR. Una foto de camara son 4-8 MB;
+ * subirla entera desde la calle tarda una eternidad y no aporta nada, porque el
+ * avatar mas grande que pinta la app tiene 96 px. Asi viajan unas decenas de
+ * kilobytes.
+ *
+ * Recorte centrado al lado corto: encuadrar es cosa de otra pantalla, y estirar
+ * la cara para que quepa se ve fatal en un circulo.
+ */
+async function shrink(file: File): Promise<string> {
+  const bitmap = await createImageBitmap(file)
+  try {
+    const side = Math.min(bitmap.width, bitmap.height)
+    const canvas = document.createElement('canvas')
+    canvas.width = PHOTO_SIZE
+    canvas.height = PHOTO_SIZE
+
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('sin canvas')
+    ctx.drawImage(
+      bitmap,
+      (bitmap.width - side) / 2,
+      (bitmap.height - side) / 2,
+      side,
+      side,
+      0,
+      0,
+      PHOTO_SIZE,
+      PHOTO_SIZE,
+    )
+    // JPEG y no WEBP: lo entienden todos los navegadores que puede tener la peña,
+    // y a este tamaño la diferencia de peso es de unos pocos kilobytes.
+    return canvas.toDataURL('image/jpeg', 0.82)
+  } finally {
+    // Sin esto la imagen decodificada se queda en memoria hasta que pase el GC,
+    // y en un movil justo de RAM eso se nota al probar varias fotos seguidas.
+    bitmap.close()
+  }
 }
 
 /**
@@ -36,6 +82,7 @@ export interface EditProfileProps {
 export function EditProfile({
   displayName,
   avatarColor,
+  avatarUrl,
   position,
   memberCount,
   leagueName,
@@ -46,6 +93,30 @@ export function EditProfile({
   const [editing, setEditing] = useState(false)
   const [draftName, setDraftName] = useState(displayName)
   const [draftColor, setDraftColor] = useState(avatarColor)
+
+  /**
+   * Tres estados y no dos, que es lo que hace que "no tocar la foto" sea
+   * distinto de "quitarla":
+   *   undefined -> no se ha tocado, el servidor deja la columna como esta;
+   *   string    -> foto nueva ya reducida, en data URL;
+   *   null      -> quitarla.
+   */
+  const [draftPhoto, setDraftPhoto] = useState<string | null | undefined>(undefined)
+  const [shrinking, setShrinking] = useState(false)
+
+  const shownPhoto = draftPhoto === undefined ? avatarUrl : draftPhoto
+
+  async function pickPhoto(file: File | undefined) {
+    if (!file) return
+    setShrinking(true)
+    try {
+      setDraftPhoto(await shrink(file))
+    } catch {
+      showToast('No hemos podido leer esa imagen. Prueba con otra.', 'bad')
+    } finally {
+      setShrinking(false)
+    }
+  }
 
   // Ajuste en render, NO en un efecto: el cierre del editor depende del
   // resultado de la accion, no de ningun sistema externo. Es el patron que
@@ -67,6 +138,7 @@ export function EditProfile({
     // se edita lo que hay ahora y no lo que se dejo a medias la vez anterior.
     setDraftName(displayName)
     setDraftColor(avatarColor)
+    setDraftPhoto(undefined)
     setEditing(true)
   }
 
@@ -80,7 +152,7 @@ export function EditProfile({
             aria-label="Editar tu nombre y tu color"
             className="flex-none rounded-[22px] transition-transform duration-100 active:scale-[.97] active:opacity-90"
           >
-            <Avatar name={displayName} color={avatarColor} size={64} />
+            <Avatar name={displayName} color={avatarColor} photoUrl={avatarUrl} size={64} />
           </button>
           <div className="min-w-0 flex-1">
             <h2 className="truncate text-[19px] font-extrabold tracking-[-.02em]">{displayName}</h2>
@@ -115,13 +187,59 @@ export function EditProfile({
   return (
     <Card as="section" radius={20} className="animate-slidein px-[16px] pt-[18px] pb-[16px]">
       <form action={formAction}>
-        <div className="mb-[20px] flex justify-center">
+        {/* La foto viaja en el mismo envio que el nombre y el color. `undefined`
+            no manda nada y el servidor deja la columna como esta. */}
+        {draftPhoto !== undefined && (
+          <>
+            <input type="hidden" name="avatarData" value={draftPhoto ?? ''} readOnly />
+            {draftPhoto === null && <input type="hidden" name="avatarRemove" value="1" readOnly />}
+          </>
+        )}
+
+        <div className="mb-[16px] flex flex-col items-center gap-[12px]">
           <Avatar
             name={draftName.trim() || displayName}
             color={draftColor}
+            photoUrl={shownPhoto}
             size={96}
             className="shadow-[0_12px_30px_rgba(0,0,0,.3)]"
           />
+
+          <div className="flex items-center gap-[8px]">
+            {/* El input va DENTRO del label y oculto: el de archivos no se puede
+                estilar y un boton que lo dispare por ref se rompe en algunos
+                navegadores de movil. Asi el label ES el boton. */}
+            <label className="inline-flex min-h-[38px] cursor-pointer items-center gap-[7px] rounded-[13px] border border-line bg-sunk px-[14px] text-[13px] font-bold text-txt transition-transform duration-100 active:scale-[.97] active:opacity-90">
+              <Camera size={15} strokeWidth={2.3} aria-hidden />
+              {shrinking ? 'Preparando...' : shownPhoto ? 'Cambiar foto' : 'Subir foto'}
+              <input
+                type="file"
+                accept="image/*"
+                className="sr-only"
+                onChange={(event) => {
+                  void pickPhoto(event.target.files?.[0])
+                  // Sin esto, elegir la MISMA foto otra vez no dispara `change`
+                  // y parece que el boton no hace nada.
+                  event.target.value = ''
+                }}
+              />
+            </label>
+
+            {shownPhoto && (
+              <button
+                type="button"
+                onClick={() => setDraftPhoto(null)}
+                className="inline-flex min-h-[38px] items-center rounded-[13px] border border-line px-[14px] text-[13px] font-bold text-txt3 transition-transform duration-100 active:scale-[.97] active:opacity-90"
+              >
+                Quitar
+              </button>
+            )}
+          </div>
+
+          <p className="text-center text-[11.5px] font-semibold leading-[1.4] text-txt3">
+            Sin foto se ven tus iniciales sobre tu color, que es lo que sigue apareciendo mientras
+            carga.
+          </p>
         </div>
 
         <div className="mb-[20px]">

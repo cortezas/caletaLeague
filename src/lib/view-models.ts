@@ -107,7 +107,7 @@ export type PiqueVM = {
   match: MatchRowVM                       // con result garantizado no nulo
   highlights: Array<{ value: string; text: string; tone: 'ok' | 'accent' | 'neutral' }>
   rows: Array<{
-    memberId: string; displayName: string; avatarColor: string; isMe: boolean
+    memberId: string; displayName: string; avatarColor: string; avatarUrl: string | null; isMe: boolean
     home: number; away: number; mvp: string | null; scorers: string[]; assists: string[]
     points: number; exact: boolean; signHit: boolean
     chips: Array<{ kind: PiqueChipKind; label: string; hit: boolean }>
@@ -117,7 +117,7 @@ export type PiqueVM = {
 
 export type StandingsVM = {
   leagueName: string
-  rows: Array<{ position: number; memberId: string; displayName: string; avatarColor: string; points: number; trend: number; isMe: boolean }>
+  rows: Array<{ position: number; memberId: string; displayName: string; avatarColor: string; avatarUrl: string | null; points: number; trend: number; isMe: boolean }>
 }
 
 export type GameweekStandingsVM = {
@@ -126,14 +126,14 @@ export type GameweekStandingsVM = {
   hasNext: boolean
   statusLabel: string                     // 'En juego · 3 de 10 partidos'
   rows: Array<{
-    position: number; memberId: string; displayName: string; avatarColor: string; points: number; isMe: boolean
+    position: number; memberId: string; displayName: string; avatarColor: string; avatarUrl: string | null; points: number; isMe: boolean
     breakdown: Array<{ matchId: string; label: string; myScore: string; realScore: string; points: number }>
     pendingCount: number
   }>
 }
 
 export type ProfileVM = {
-  displayName: string; avatarColor: string
+  displayName: string; avatarColor: string; avatarUrl: string | null
   position: number; memberCount: number; leagueName: string
   totalPoints: number
   stats: { totalPoints: number; exactHits: number; signAccuracy: number; bestGameweekPoints: number; bestGameweekNumber: number }
@@ -141,7 +141,7 @@ export type ProfileVM = {
   streak: { count: number; title: string; text: string } | null
 }
 
-export type LeagueSettingsVM = { leagueName: string; inviteCode: string; memberCount: number; isAdmin: boolean; scoring: Scoring; displayName: string; avatarColor: string }
+export type LeagueSettingsVM = { leagueName: string; inviteCode: string; memberCount: number; isAdmin: boolean; scoring: Scoring; displayName: string; avatarColor: string; avatarUrl: string | null }
 
 /**
  * `result` trae los goleadores Y los asistentes reales (`MatchResult.assists`),
@@ -300,7 +300,7 @@ export type HeadToHeadVM = {
   rows: Array<{
     memberId: string
     displayName: string
-    avatarColor: string
+    avatarColor: string; avatarUrl: string | null
     wins: number
     draws: number
     losses: number

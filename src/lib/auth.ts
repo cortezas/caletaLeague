@@ -35,7 +35,7 @@ export type MemberSession = {
   memberId: string
   userId: string
   displayName: string
-  avatarColor: string
+  avatarColor: string; avatarUrl: string | null
   leagueId: string
   leagueName: string
   isAdmin: boolean
@@ -94,6 +94,7 @@ export async function requireMember(): Promise<MemberSession> {
     userId: ctx.userId,
     displayName: ctx.displayName,
     avatarColor: ctx.avatarColor,
+    avatarUrl: ctx.avatarUrl,
     leagueId: ctx.leagueId,
     leagueName: ctx.leagueName,
     isAdmin: ctx.isAdmin,
@@ -110,6 +111,7 @@ export async function getOptionalMember(): Promise<MemberSession | null> {
       userId: ctx.userId,
       displayName: ctx.displayName,
       avatarColor: ctx.avatarColor,
+    avatarUrl: ctx.avatarUrl,
       leagueId: ctx.leagueId,
       leagueName: ctx.leagueName,
       isAdmin: ctx.isAdmin,

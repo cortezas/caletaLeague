@@ -23,6 +23,7 @@ export default async function PerfilPage() {
         <EditProfile
           displayName={profile.displayName}
           avatarColor={profile.avatarColor}
+          avatarUrl={profile.avatarUrl}
           position={profile.position}
           memberCount={profile.memberCount}
           leagueName={profile.leagueName}

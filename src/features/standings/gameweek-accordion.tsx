@@ -45,7 +45,7 @@ export function GameweekAccordion({ rows }: GameweekAccordionProps) {
               <span className="w-[18px] flex-none text-center font-num text-[15px] font-bold text-txt3">
                 {row.position}
               </span>
-              <Avatar name={row.displayName} color={row.avatarColor} size={32} />
+              <Avatar name={row.displayName} color={row.avatarColor} photoUrl={row.avatarUrl} size={32} />
               <span
                 className={cn(
                   'min-w-0 flex-1 truncate text-[14px]',

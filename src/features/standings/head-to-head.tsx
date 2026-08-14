@@ -43,7 +43,7 @@ function HeadToHeadRow({ row }: { row: Row }) {
         }.`
       }
     >
-      <Avatar name={row.displayName} color={row.avatarColor} size={34} />
+      <Avatar name={row.displayName} color={row.avatarColor} photoUrl={row.avatarUrl} size={34} />
       <span className="min-w-0 flex-1 truncate text-[14.5px] font-semibold">{row.displayName}</span>
 
       {/* El balance no se lee como texto: ya va entero en el aria-label de la fila. */}

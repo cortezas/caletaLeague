@@ -40,6 +40,7 @@ export function Podium({ rows }: PodiumProps) {
             <Avatar
               name={row.displayName}
               color={row.avatarColor}
+              photoUrl={row.avatarUrl}
               size={place.avatar}
               ring={place.ring}
               className="shadow-[0_8px_22px_rgba(0,0,0,.3)]"

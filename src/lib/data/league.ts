@@ -68,7 +68,7 @@ export type MemberInfo = {
   memberId: string
   userId: string
   displayName: string
-  avatarColor: string
+  avatarColor: string; avatarUrl: string | null
 }
 
 export type DataContext = {
@@ -79,7 +79,7 @@ export type DataContext = {
   leagueName: string
   inviteCode: string
   displayName: string
-  avatarColor: string
+  avatarColor: string; avatarUrl: string | null
   isAdmin: boolean
   scoring: Scoring
   /** Los miembros de MI peña, por orden de alta. RLS ya recorta a mi liga. */
@@ -106,6 +106,7 @@ type MemberRow = {
   league_id: string
   display_name: string
   avatar_color: string
+  avatar_url: string | null
   leagues: LeagueEmbed
 }
 
@@ -147,7 +148,7 @@ export const getDataContext = cache(async (): Promise<DataContext | null> => {
   const { data, error } = await supabase
     .from('members')
     .select(
-      'id, user_id, league_id, display_name, avatar_color, ' +
+      'id, user_id, league_id, display_name, avatar_color, avatar_url, ' +
         'leagues!inner(id, name, invite_code, scoring, admin_user_id)',
     )
     .order('joined_at', { ascending: true })
@@ -168,6 +169,7 @@ export const getDataContext = cache(async (): Promise<DataContext | null> => {
     inviteCode: league.invite_code,
     displayName: mine.display_name,
     avatarColor: mine.avatar_color,
+      avatarUrl: mine.avatar_url,
     isAdmin: league.admin_user_id === userId,
     scoring: scoringOf(league.scoring),
     members: rows
@@ -177,6 +179,7 @@ export const getDataContext = cache(async (): Promise<DataContext | null> => {
         userId: row.user_id,
         displayName: row.display_name,
         avatarColor: row.avatar_color,
+      avatarUrl: row.avatar_url,
       })),
     now: Date.now(),
   }
@@ -508,6 +511,7 @@ export async function getLeagueSettings(): Promise<LeagueSettingsVM> {
     scoring: ctx.scoring,
     displayName: ctx.displayName,
     avatarColor: ctx.avatarColor,
+    avatarUrl: ctx.avatarUrl,
   }
 }
 

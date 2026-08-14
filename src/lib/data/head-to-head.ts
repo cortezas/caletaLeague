@@ -90,6 +90,7 @@ async function tallyFromSupabase(ctx: DataContext): Promise<Row[]> {
         memberId: member.memberId,
         displayName: member.displayName,
         avatarColor: member.avatarColor,
+        avatarUrl: member.avatarUrl,
         ...tally,
       }
     })
@@ -123,7 +124,7 @@ function compare(
   gameweekIds: string[],
   mine: Map<string, number>,
   theirs: Map<string, number>,
-): Omit<Row, 'memberId' | 'displayName' | 'avatarColor'> {
+): Omit<Row, 'memberId' | 'displayName' | 'avatarColor' | 'avatarUrl'> {
   let wins = 0
   let draws = 0
   let losses = 0
@@ -186,6 +187,7 @@ async function mockHeadToHead(): Promise<HeadToHeadVM> {
         memberId: row.memberId,
         displayName: row.displayName,
         avatarColor: row.avatarColor,
+        avatarUrl: row.avatarUrl,
         wins: 0,
         draws: 0,
         losses: 0,

@@ -265,6 +265,7 @@ export function mockMemberSession(): MemberSession {
     userId: `user-${me.id}`,
     displayName: me.displayName,
     avatarColor: me.avatarColor,
+      avatarUrl: null,
     leagueId: 'lg-caleta',
     leagueName: LEAGUE.name,
     // En el prototipo el usuario organiza: /ajustes enseña la tarjeta de admin.
@@ -482,6 +483,7 @@ export async function mockGetMatchPique(matchId: string): Promise<PiqueVM | null
         memberId: person.id,
         displayName: person.displayName,
         avatarColor: person.avatarColor,
+      avatarUrl: null,
         isMe: person.id === myId,
         home: prediction.home,
         away: prediction.away,
@@ -587,6 +589,7 @@ export async function mockGetSeasonStandings(): Promise<StandingsVM> {
       memberId: person.id,
       displayName: person.displayName,
       avatarColor: person.avatarColor,
+      avatarUrl: null,
       points: STANDINGS[index],
       trend: TREND[index],
       isMe: person.id === myId,
@@ -631,6 +634,7 @@ export async function mockGetGameweekStandings(n: number): Promise<GameweekStand
         memberId: person.id,
         displayName: person.displayName,
         avatarColor: person.avatarColor,
+      avatarUrl: null,
         points: total.total,
         isMe: person.id === myId,
         breakdown,
@@ -675,6 +679,7 @@ export async function mockGetProfile(): Promise<ProfileVM> {
   return {
     displayName: member.displayName,
     avatarColor: member.avatarColor,
+      avatarUrl: null,
     position: myRow.position,
     memberCount: PEOPLE.length,
     leagueName: LEAGUE.name,
@@ -705,6 +710,7 @@ export async function mockGetLeagueSettings(): Promise<LeagueSettingsVM> {
     scoring: DEFAULT_SCORING,
     displayName: member.displayName,
     avatarColor: member.avatarColor,
+      avatarUrl: null,
   }
 }
 

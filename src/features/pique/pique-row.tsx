@@ -50,7 +50,7 @@ export function PiqueRow({ row }: PiqueRowProps) {
       )}
     >
       <div className="flex items-center gap-[10px]">
-        <Avatar name={row.displayName} color={row.avatarColor} size={30} />
+        <Avatar name={row.displayName} color={row.avatarColor} photoUrl={row.avatarUrl} size={30} />
         <span
           className={cn(
             'min-w-0 flex-1 truncate text-[13.5px]',

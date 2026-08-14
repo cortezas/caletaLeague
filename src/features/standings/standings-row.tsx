@@ -49,7 +49,7 @@ export function StandingsRow({ row }: StandingsRowProps) {
       <span className="w-[20px] flex-none text-center font-num text-[16px] font-bold text-txt3">
         {row.position}
       </span>
-      <Avatar name={row.displayName} color={row.avatarColor} size={34} />
+      <Avatar name={row.displayName} color={row.avatarColor} photoUrl={row.avatarUrl} size={34} />
       <span
         className={cn(
           'min-w-0 flex-1 truncate text-[14.5px]',
