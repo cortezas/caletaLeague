@@ -163,6 +163,15 @@ export type AdminMatchVM = {
    * manual olvidada mandaria el resto de la temporada.
    */
   kickoffManual: boolean
+  /**
+   * Lo que decia football-data.org en la ultima pasada del cron, se este usando
+   * o no (0017). `null` = todavia no ha pasado ninguna ingesta por esta fila.
+   *
+   * Se pinta para contestar sin preguntarle a nadie a "¿la API ya recoge el
+   * aplazamiento?": si esto coincide con la hora corregida, ya se puede soltar
+   * el mando (y de hecho la propia ingesta lo suelta sola).
+   */
+  apiKickoffAt: string | null
 }
 
 /**

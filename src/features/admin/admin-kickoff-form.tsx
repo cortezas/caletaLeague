@@ -117,7 +117,8 @@ export function AdminKickoffForm({ matches }: AdminKickoffFormProps) {
     <div className="flex flex-col gap-[13px] px-[14px] pt-[14px] pb-[30px]">
       <p className="rounded-[14px] border border-line bg-warn-soft px-[13px] py-[11px] text-[12.5px] font-semibold leading-[1.45] text-txt2">
         Solo para aplazamientos. La API tarda en publicarlos, y hasta que lo hace la peña no puede
-        pronosticar ese partido. Lo que pongas aquí manda: la ingesta deja de tocarlo.
+        pronosticar ese partido. Lo que pongas aquí manda, y se quita solo en cuanto la API se ponga
+        al día.
       </p>
 
       <label className="block">
@@ -171,6 +172,28 @@ export function AdminKickoffForm({ matches }: AdminKickoffFormProps) {
         <p className="mt-[10px] text-[12px] font-semibold leading-[1.45] text-txt3">
           Hora de Madrid. Ahora mismo: {label(current.kickoffAt)}.
         </p>
+
+        {/* Contesta a "¿la API ya recoge el aplazamiento?" sin tener que ir a
+            mirar a ningun sitio. Solo aparece cuando manda una correccion: si
+            manda la API, la hora de arriba YA es la suya. */}
+        {current.kickoffManual && (
+          <p
+            className={cn(
+              'mt-[8px] rounded-[11px] px-[11px] py-[8px] text-[12px] font-semibold leading-[1.45]',
+              current.apiKickoffAt === null
+                ? 'bg-sunk text-txt3'
+                : current.apiKickoffAt === current.kickoffAt
+                  ? 'bg-ok-soft text-ok'
+                  : 'bg-sunk text-txt2',
+            )}
+          >
+            {current.apiKickoffAt === null
+              ? 'La API todavía no ha pasado por este partido.'
+              : current.apiKickoffAt === current.kickoffAt
+                ? 'La API ya dice esta misma hora: la corrección sobra y se quita sola en la próxima pasada.'
+                : `La API sigue diciendo ${label(current.apiKickoffAt)}. En cuanto publique cualquier cambio, manda ella otra vez.`}
+          </p>
+        )}
       </div>
 
       <form action={formAction}>
@@ -189,9 +212,8 @@ export function AdminKickoffForm({ matches }: AdminKickoffFormProps) {
             Volver a seguir a la API
           </Button>
           <p className="mt-[8px] text-[12px] font-semibold leading-[1.45] text-txt3">
-            La hora vuelve a ser la oficial en la siguiente pasada del cron, como mucho una hora.
-            Conviene hacerlo cuando la API ya publique el aplazamiento: si no, una corrección de hoy
-            seguiría mandando en abril.
+            Normalmente no hace falta tocarlo: la corrección se quita sola en cuanto la API diga esta
+            misma hora o publique cualquier cambio. Esto es para deshacerla antes de tiempo.
           </p>
         </form>
       )}

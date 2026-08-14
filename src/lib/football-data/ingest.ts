@@ -267,6 +267,11 @@ export interface SyncReport {
    * vida por olvido.
    */
   kickoffsManual: number
+  /**
+   * Correcciones a mano que ESTA pasada ha devuelto a la API, porque el
+   * proveedor ya coincide o porque acaba de publicar un cambio (0017).
+   */
+  kickoffsReleased: number
   /** Partidos a los que se les ha escrito marcador real en esta pasada. */
   resultsWritten: number
   skipped: SkippedMatch[]
@@ -353,6 +358,8 @@ interface ExistingMatch {
   real_away: number | null
   /** 'admin' = la hora la fijo el organizador y aqui no se toca (0016). */
   kickoff_source: string | null
+  /** Lo que decia la API en la pasada anterior (0017). null = ninguna aun. */
+  kickoff_api_at: string | null
 }
 
 // ---------------------------------------------------------------------------
@@ -506,7 +513,7 @@ export async function syncMatches(options: SyncOptions = {}): Promise<SyncReport
   for (const ids of chunk(candidates.map((c) => c.externalId), 100)) {
     const { data, error } = await admin
       .from('matches')
-      .select('id, external_id, kickoff_at, status, real_home, real_away, kickoff_source')
+      .select('id, external_id, kickoff_at, status, real_home, real_away, kickoff_source, kickoff_api_at')
       .in('external_id', ids)
     if (error) {
       // 42703 / PGRST204 = la columna no existe todavia. Mensaje explicito en vez
@@ -540,7 +547,7 @@ export async function syncMatches(options: SyncOptions = {}): Promise<SyncReport
     const { data, error } = await admin
       .from('matches')
       .select(
-        'id, external_id, gameweek_id, home_code, away_code, kickoff_at, status, real_home, real_away, kickoff_source',
+        'id, external_id, gameweek_id, home_code, away_code, kickoff_at, status, real_home, real_away, kickoff_source, kickoff_api_at',
       )
       .in('gameweek_id', gameweekIds)
       .is('external_id', null)
@@ -559,6 +566,13 @@ export async function syncMatches(options: SyncOptions = {}): Promise<SyncReport
   let kickoffsManual = 0
   let resultsWritten = 0
 
+  /**
+   * Correcciones a mano que esta pasada devuelve a la API. Se aplican DESPUES
+   * del upsert y una a una, porque llevan un compare-and-swap sobre la hora que
+   * un upsert masivo no puede expresar.
+   */
+  const releases: Array<{ id: string; kickoffAt: string }> = []
+
   let adopted = 0
 
   interface MatchRow {
@@ -576,6 +590,12 @@ export async function syncMatches(options: SyncOptions = {}): Promise<SyncReport
      * desaparece sola de la interfaz.
      */
     kickoff_provisional: boolean
+    /**
+     * Lo que dice la API AHORA, se este usando o no (0017). Se escribe siempre,
+     * tambien cuando manda una correccion del organizador: es la foto contra la
+     * que la pasada siguiente decide si el proveedor se ha movido.
+     */
+    kickoff_api_at: string
     status: MatchStatus
     real_home: number | null
     real_away: number | null
@@ -622,8 +642,36 @@ export async function syncMatches(options: SyncOptions = {}): Promise<SyncReport
     // Va DESPUES del sellado y no lo pisa: un partido ya empezado no se mueve ni
     // a mano. Moverle la hora hacia adelante volveria a esconder pronosticos que
     // la peña ya tiene vistos.
-    const manual =
+    //
+    // CUANDO SE SUELTA EL MANDO SOLO (migracion 0017)
+    // Una correccion a mano es un apaño mientras el proveedor se pone al dia, no
+    // una decision para toda la temporada. Se devuelve el mando a la API en
+    // cuanto pasa cualquiera de estas dos cosas:
+    //
+    //   a) la API ya coincide con la hora corregida: no queda nada que proteger;
+    //   b) la API ha CAMBIADO respecto a la pasada anterior: acaba de publicar
+    //      algo, y eso es mas de fiar que una correccion de hace dias.
+    //
+    // (b) es la importante y la que no se ve a simple vista: si el organizador
+    // se equivoco de fecha, con solo (a) su hora incorrecta seguiria por encima
+    // de la oficial para siempre, y la peña jugaria contra una hora inventada.
+    // Con (b) basta con que LaLiga publique lo que sea para que mande la API.
+    //
+    // Con `kickoff_api_at` a null (fila anterior a la 0017, aun sin pasada) (b)
+    // no se puede evaluar y solo actua (a): sin foto con la que comparar, no
+    // soltar el mando es lo prudente.
+    const apiAgrees = Number.isFinite(storedKickoffMs) && candidate.apiKickoffMs === storedKickoffMs
+    const lastApiMs = stored?.kickoff_api_at ? Date.parse(stored.kickoff_api_at) : Number.NaN
+    const apiMoved = Number.isFinite(lastApiMs) && lastApiMs !== candidate.apiKickoffMs
+
+    const wasManual =
       !sealed && stored?.kickoff_source === 'admin' && Number.isFinite(storedKickoffMs)
+    const release = wasManual && (apiAgrees || apiMoved)
+    if (release) {
+      releases.push({ id: stored!.id, kickoffAt: stored!.kickoff_at })
+    }
+
+    const manual = wasManual && !release
     if (manual) kickoffsManual += 1
 
     const kickoffMs = sealed || manual ? storedKickoffMs : candidate.apiKickoffMs
@@ -658,6 +706,7 @@ export async function syncMatches(options: SyncOptions = {}): Promise<SyncReport
       away_code: candidate.away,
       kickoff_at: new Date(kickoffMs).toISOString(),
       kickoff_provisional: false,
+      kickoff_api_at: new Date(candidate.apiKickoffMs).toISOString(),
       status,
       real_home: realHome,
       real_away: realAway,
@@ -701,6 +750,7 @@ export async function syncMatches(options: SyncOptions = {}): Promise<SyncReport
       home_code: r.home_code,
       away_code: r.away_code,
       kickoff_at: r.kickoff_at,
+      kickoff_api_at: r.kickoff_api_at,
       status: r.status,
       real_home: r.real_home,
       real_away: r.real_away,
@@ -736,6 +786,46 @@ export async function syncMatches(options: SyncOptions = {}): Promise<SyncReport
     matchesUpserted += data?.length ?? 0
   }
 
+  // ---- 6. Soltar el mando de las horas puestas a mano (0017) --------------
+  // Va DESPUES del upsert, y el upsert ya ha hecho la mitad del trabajo: para
+  // una fila que se suelta, `manual` valia false, asi que la hora escrita es ya
+  // la oficial de la API. Aqui solo queda mover `kickoff_source` a 'api'.
+  //
+  // Una por una y con compare-and-swap sobre `kickoff_at`, no en lote: entre que
+  // esta pasada leyo y escribe cabe justo el momento en que el organizador
+  // guarda OTRA correccion. Si la hora ya no es la que vimos, la fila cambio
+  // debajo y no se toca; el `eq('kickoff_source', 'admin')` solo no bastaria,
+  // porque una correccion nueva tambien es 'admin'.
+  let kickoffsReleased = 0
+  for (const item of releases) {
+    const official = rows.find((r) => r.id === item.id)
+    if (!official) continue
+    const { data, error } = await admin
+      .from('matches')
+      .update({ kickoff_source: 'api' })
+      .eq('id', item.id)
+      .eq('kickoff_source', 'admin')
+      // Se compara contra la hora que ACABA de escribir el upsert, no contra la
+      // que habia antes: para una fila soltada el upsert ya puso la oficial, y
+      // comparar con la vieja no casaria nunca. Si aqui no casa es que alguien
+      // ha guardado otra correccion en el ultimo instante, y entonces se
+      // respeta y no se suelta nada.
+      .eq('kickoff_at', official.kickoff_at)
+      .select('id')
+    if (error) {
+      warnings.push(`No se pudo devolver a la API el horario de ${item.id}: ${error.message}`)
+      continue
+    }
+    if (data && data.length > 0) kickoffsReleased += 1
+  }
+
+  if (kickoffsReleased > 0) {
+    warnings.push(
+      `${kickoffsReleased} horario(s) corregido(s) a mano vuelven a seguir a la API: el proveedor ` +
+        'ya publica ese partido.',
+    )
+  }
+
   if (orphansByPairing.size > 0) {
     warnings.push(
       `${orphansByPairing.size} partido(s) sembrado(s) sin equivalente en la API. Se dejan como ` +
@@ -761,6 +851,7 @@ export async function syncMatches(options: SyncOptions = {}): Promise<SyncReport
     adopted,
     kickoffsSealed,
     kickoffsManual,
+    kickoffsReleased,
     resultsWritten,
     skipped,
     unknownTeams: [...unknownById.values()],
