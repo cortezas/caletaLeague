@@ -259,6 +259,14 @@ export interface SyncReport {
   adopted: number
   /** Partidos cuyo `kickoff_at` NO se toco por estar ya en el pasado. */
   kickoffsSealed: number
+  /**
+   * Partidos cuyo `kickoff_at` NO se toco porque lo fijo el organizador
+   * (`kickoff_source = 'admin'`, migracion 0016). Se informa aparte de
+   * `kickoffsSealed` para que se pueda ver en el informe del cron que una hora
+   * corregida a mano sigue en pie -- y para notar si alguna se quedo ahi de por
+   * vida por olvido.
+   */
+  kickoffsManual: number
   /** Partidos a los que se les ha escrito marcador real en esta pasada. */
   resultsWritten: number
   skipped: SkippedMatch[]
@@ -343,6 +351,8 @@ interface ExistingMatch {
   status: MatchStatus
   real_home: number | null
   real_away: number | null
+  /** 'admin' = la hora la fijo el organizador y aqui no se toca (0016). */
+  kickoff_source: string | null
 }
 
 // ---------------------------------------------------------------------------
@@ -496,7 +506,7 @@ export async function syncMatches(options: SyncOptions = {}): Promise<SyncReport
   for (const ids of chunk(candidates.map((c) => c.externalId), 100)) {
     const { data, error } = await admin
       .from('matches')
-      .select('id, external_id, kickoff_at, status, real_home, real_away')
+      .select('id, external_id, kickoff_at, status, real_home, real_away, kickoff_source')
       .in('external_id', ids)
     if (error) {
       // 42703 / PGRST204 = la columna no existe todavia. Mensaje explicito en vez
@@ -529,7 +539,9 @@ export async function syncMatches(options: SyncOptions = {}): Promise<SyncReport
   if (gameweekIds.length > 0) {
     const { data, error } = await admin
       .from('matches')
-      .select('id, external_id, gameweek_id, home_code, away_code, kickoff_at, status, real_home, real_away')
+      .select(
+        'id, external_id, gameweek_id, home_code, away_code, kickoff_at, status, real_home, real_away, kickoff_source',
+      )
       .in('gameweek_id', gameweekIds)
       .is('external_id', null)
     if (error) throw new Error(`No se pudieron leer los partidos sembrados: ${error.message}`)
@@ -544,6 +556,7 @@ export async function syncMatches(options: SyncOptions = {}): Promise<SyncReport
   // ---- 4. Filas finales --------------------------------------------------
 
   let kickoffsSealed = 0
+  let kickoffsManual = 0
   let resultsWritten = 0
 
   let adopted = 0
@@ -596,7 +609,24 @@ export async function syncMatches(options: SyncOptions = {}): Promise<SyncReport
     // base, esa hora manda sobre la de la API pase lo que pase.
     const sealed = stored !== undefined && Number.isFinite(storedKickoffMs) && storedKickoffMs <= nowMs
     if (sealed) kickoffsSealed += 1
-    const kickoffMs = sealed ? storedKickoffMs : candidate.apiKickoffMs
+
+    // INVARIANTE 1-bis (migracion 0016): hora fijada por el organizador.
+    //
+    // Cuando LaLiga aplaza un partido, football-data.org tarda en enterarse: el
+    // 14/08/2026 aplazaron Celta-Osasuna y la API seguia dando la hora vieja
+    // horas despues, incluso forzando una pasada a mano. Como el estado que se
+    // pinta, el cierre del pronostico y la RLS cuelgan los tres de `kickoff_at`,
+    // esa hora vieja deja a la peña sin poder pronosticar un partido que no se
+    // ha jugado Y destapa los pronosticos de todos.
+    //
+    // Va DESPUES del sellado y no lo pisa: un partido ya empezado no se mueve ni
+    // a mano. Moverle la hora hacia adelante volveria a esconder pronosticos que
+    // la peña ya tiene vistos.
+    const manual =
+      !sealed && stored?.kickoff_source === 'admin' && Number.isFinite(storedKickoffMs)
+    if (manual) kickoffsManual += 1
+
+    const kickoffMs = sealed || manual ? storedKickoffMs : candidate.apiKickoffMs
 
     let status = mapStatus(candidate.fdStatus, kickoffMs, nowMs)
     let realHome = stored?.real_home ?? null
@@ -730,6 +760,7 @@ export async function syncMatches(options: SyncOptions = {}): Promise<SyncReport
     matchesUpserted,
     adopted,
     kickoffsSealed,
+    kickoffsManual,
     resultsWritten,
     skipped,
     unknownTeams: [...unknownById.values()],

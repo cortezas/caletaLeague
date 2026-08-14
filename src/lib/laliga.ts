@@ -199,8 +199,16 @@ function madridOffsetHours(date: string): number {
   return after(start.month, start.day) && before(end.month, end.day) ? 2 : 1
 }
 
-/** Convierte una hora de PARED de Madrid (`YYYY-MM-DD HH:MM`) a ISO en UTC. */
-function madridWallToUtc(day: string, time: string): string {
+/**
+ * Convierte una hora de PARED de Madrid (`YYYY-MM-DD HH:MM`) a ISO en UTC.
+ *
+ * Exportada porque la usa tambien el panel del organizador: el `datetime-local`
+ * con el que corrige un horario aplazado da hora de pared, y quien la interpreta
+ * tiene que ser el SERVIDOR. Si se convirtiera en el navegador, un movil con el
+ * huso mal puesto (o alguien de viaje) guardaria el partido a otra hora, y de
+ * `kickoff_at` cuelgan el cierre del pronostico y la RLS.
+ */
+export function madridWallToUtc(day: string, time: string): string {
   const [h, min] = time.split(':').map(Number)
   const at = new Date(`${day}T00:00:00Z`)
   at.setUTCHours(h - madridOffsetHours(day), min)

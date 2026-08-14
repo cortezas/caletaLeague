@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { notFound, unstable_rethrow } from 'next/navigation'
 
 import { ScreenHeader } from '@/components/ui'
+import { AdminKickoffForm } from '@/features/admin/admin-kickoff-form'
 import { AdminResultForm } from '@/features/admin/admin-result-form'
 import { AdminScoringForm } from '@/features/admin/admin-scoring-form'
 import { AdminSquadForm } from '@/features/admin/admin-squad-form'
@@ -23,6 +24,7 @@ export const metadata: Metadata = { title: 'Administrador · La Caleta League' }
  */
 const TABS = [
   { key: 'resultados', label: 'Resultados' },
+  { key: 'horarios', label: 'Horarios' },
   { key: 'puntuacion', label: 'Puntuación' },
   { key: 'plantillas', label: 'Plantillas' },
 ] as const
@@ -91,7 +93,13 @@ export default async function AdminPage({
   }
 
   const active: TabKey =
-    tab === 'puntuacion' ? 'puntuacion' : tab === 'plantillas' ? 'plantillas' : 'resultados'
+    tab === 'puntuacion'
+      ? 'puntuacion'
+      : tab === 'plantillas'
+        ? 'plantillas'
+        : tab === 'horarios'
+          ? 'horarios'
+          : 'resultados'
   const [settings, gameweek, squads] = await Promise.all([
     getLeagueSettings(),
     getAdminMatches(jornada),
@@ -99,14 +107,24 @@ export default async function AdminPage({
   ])
   if (!gameweek) notFound()
 
+  // En Horarios lo pendiente no son los resultados: es cuantos partidos siguen
+  // sin empezar, que son los unicos cuya hora se puede mover.
+  const movableCount = gameweek.matches.filter((match) => match.status === 'open').length
+
   const pendingLabel =
     gameweek.matches.length === 0
       ? 'Sin partidos'
-      : gameweek.pendingCount === 0
-        ? 'Nada pendiente'
-        : gameweek.pendingCount === 1
-          ? '1 partido por rellenar'
-          : `${gameweek.pendingCount} partidos por rellenar`
+      : active === 'horarios'
+        ? movableCount === 0
+          ? 'Ninguno por empezar'
+          : movableCount === 1
+            ? '1 partido por empezar'
+            : `${movableCount} partidos por empezar`
+        : gameweek.pendingCount === 0
+          ? 'Nada pendiente'
+          : gameweek.pendingCount === 1
+            ? '1 partido por rellenar'
+            : `${gameweek.pendingCount} partidos por rellenar`
 
   return (
     <>
@@ -129,13 +147,15 @@ export default async function AdminPage({
         </div>
       </ScreenHeader>
 
-      {active === 'resultados' && (
+      {/* La navegacion de jornadas la comparten Resultados y Horarios: las dos
+          trabajan sobre una jornada concreta. Puntuación y Plantillas no. */}
+      {(active === 'resultados' || active === 'horarios') && (
         <>
           <div className="px-[14px] pt-[14px]">
             <nav aria-label="Cambiar de jornada" className="flex items-center gap-[10px]">
               {gameweek.hasPrev && gameweek.prevNumber !== null ? (
                 <Link
-                  href={hrefFor('resultados', gameweek.prevNumber)}
+                  href={hrefFor(active, gameweek.prevNumber)}
                   aria-label={`Ir a la jornada ${gameweek.prevNumber}`}
                   className={cn(NAV_BUTTON, NAV_BUTTON_ON)}
                 >
@@ -162,7 +182,7 @@ export default async function AdminPage({
 
               {gameweek.hasNext && gameweek.nextNumber !== null ? (
                 <Link
-                  href={hrefFor('resultados', gameweek.nextNumber)}
+                  href={hrefFor(active, gameweek.nextNumber)}
                   aria-label={`Ir a la jornada ${gameweek.nextNumber}`}
                   className={cn(NAV_BUTTON, NAV_BUTTON_ON)}
                 >
@@ -185,7 +205,7 @@ export default async function AdminPage({
                 cierra antes: si se ha ido a otra hay que decirlo y dar la vuelta. */}
             {!gameweek.isDefault && (
               <Link
-                href="/ajustes/admin"
+                href={hrefFor(active)}
                 className="mt-[9px] flex min-h-[44px] items-center justify-between gap-[10px] rounded-[13px] border border-line bg-sunk px-[13px] py-[9px] transition-transform duration-100 active:scale-[.97] active:opacity-90"
               >
                 <span className="min-w-0 flex-1 truncate text-[11.5px] font-semibold text-txt3">
@@ -199,13 +219,17 @@ export default async function AdminPage({
           </div>
 
           {/* `key`: al cambiar de jornada el formulario tiene que empezar de cero.
-              Sin esto React reutiliza el estado y los marcadores de la jornada
-              nueva saldrian en blanco. */}
-          <AdminResultForm
-            key={gameweek.number}
-            matches={gameweek.matches}
-            memberCount={settings.memberCount}
-          />
+              Sin esto React reutiliza el estado y los marcadores (o el partido
+              elegido) de la jornada anterior. */}
+          {active === 'resultados' ? (
+            <AdminResultForm
+              key={gameweek.number}
+              matches={gameweek.matches}
+              memberCount={settings.memberCount}
+            />
+          ) : (
+            <AdminKickoffForm key={gameweek.number} matches={gameweek.matches} />
+          )}
         </>
       )}
       {active === 'puntuacion' && (

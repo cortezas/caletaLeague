@@ -739,6 +739,10 @@ export async function mockGetAdminMatches(): Promise<AdminMatchVM[]> {
       result,
       missingMvp: match.status === 'played' && !result?.mvp,
       players: [...squadOf(match.home), ...squadOf(match.away)],
+      kickoffAt: match.kickoffAt,
+      // Sin base de datos no hay `kickoff_source` que mirar: en seco la hora
+      // siempre es la del calendario, nunca una correccion del organizador.
+      kickoffManual: false,
     }
   })
 }

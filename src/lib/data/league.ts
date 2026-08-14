@@ -202,13 +202,15 @@ export type MatchRow = {
   real_scorers: string[] | null
   real_assists: string[] | null
   position: number
+  /** 'admin' = la hora la fijo el organizador; la ingesta no la pisa (0016). */
+  kickoff_source: string | null
 }
 
 // `real_assists` va SIEMPRE en el select. Si falta, `resultOf` monta un
 // MatchResult sin `assists` y el primer `.map()` de la pantalla revienta.
 const MATCH_COLUMNS =
   'id, gameweek_id, home_code, away_code, kickoff_at, kickoff_provisional, ' +
-  'status, real_home, real_away, real_mvp, real_scorers, real_assists, position'
+  'status, real_home, real_away, real_mvp, real_scorers, real_assists, position, kickoff_source'
 
 export const getLeagueGameweeks = cache(async (): Promise<GameweekRow[]> => {
   const ctx = await getDataContext()
@@ -631,6 +633,8 @@ export async function getAdminMatches(n?: number): Promise<AdminGameweekVM | nul
       result,
       missingMvp: status === 'played' && !result?.mvp,
       players: [...(squads.get(row.home_code) ?? []), ...(squads.get(row.away_code) ?? [])],
+      kickoffAt: row.kickoff_at,
+      kickoffManual: row.kickoff_source === 'admin',
     }
   })
 
@@ -659,6 +663,9 @@ async function mockAdminGameweek(n?: number): Promise<AdminGameweekVM | null> {
     result: row.result,
     missingMvp: row.status === 'played' && !row.result?.mvp,
     players: [],
+    kickoffAt: row.kickoffAt,
+    // Sin base de datos no hay columna que consultar: en seco nada es manual.
+    kickoffManual: false,
   }))
 
   return {

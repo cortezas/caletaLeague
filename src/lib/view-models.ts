@@ -148,7 +148,22 @@ export type LeagueSettingsVM = { leagueName: string; inviteCode: string; memberC
  * que son las dos listas que el panel de organizador edita. `players` es la union
  * de las dos plantillas: alimenta por igual al MVP, a los goles y a las asistencias.
  */
-export type AdminMatchVM = { id: string; label: string; status: MatchStatus; result: MatchResult | null; missingMvp: boolean; players: string[] }
+export type AdminMatchVM = {
+  id: string
+  label: string
+  status: MatchStatus
+  result: MatchResult | null
+  missingMvp: boolean
+  players: string[]
+  /** ISO en UTC. Lo que el organizador edita en la pestaña Horarios. */
+  kickoffAt: string
+  /**
+   * true = la hora la fijo el organizador y la ingesta no la toca (0016). Se
+   * pinta para que se vea de un vistazo cual sigue a la API y cual no: una hora
+   * manual olvidada mandaria el resto de la temporada.
+   */
+  kickoffManual: boolean
+}
 
 /**
  * La jornada que rellena el organizador, con su navegacion.

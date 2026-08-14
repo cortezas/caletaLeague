@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache'
 
 import { requireAdmin } from '@/lib/auth'
-import { TEAM_CODES } from '@/lib/laliga'
+import { madridWallToUtc, TEAM_CODES } from '@/lib/laliga'
 import { normalizePlayer } from '@/lib/squads'
 import { createClient, isSupabaseConfigured } from '@/lib/supabase/server'
 import type { Scoring, TeamCode } from '@/lib/types'
@@ -344,4 +344,127 @@ function squadWriteError(error: { code?: string }): string {
   if (error.code === 'PGRST205') return 'Las plantillas todavía no están disponibles.'
   if (error.code === '42501') return DENIED
   return 'No hemos podido guardar las plantillas.'
+}
+
+/**
+ * Fila que envia `AdminKickoffForm`.
+ * `day`/`time` son hora de PARED de Madrid; `manual: false` devuelve el mando a
+ * la API y entonces `day`/`time` sobran.
+ */
+type KickoffInput = { id: string; day: string; time: string; manual: boolean }
+
+const DAY_RE = /^\d{4}-\d{2}-\d{2}$/
+const TIME_RE = /^\d{2}:\d{2}$/
+
+/**
+ * Fija a mano la hora de un partido que aun no ha empezado, o devuelve el mando
+ * a football-data.org.
+ *
+ * PARA QUE SIRVE
+ * Cuando LaLiga aplaza un partido, la API tarda en enterarse (Celta-Osasuna, el
+ * 14/08/2026: horas despues seguia dando la hora vieja). Como el cierre del
+ * pronostico, el estado que se pinta y la RLS cuelgan los tres de `kickoff_at`,
+ * esperar a la API significa que la peña no puede pronosticar un partido que no
+ * se ha jugado y que ademas se le destapan los pronosticos a todo el mundo.
+ *
+ * LAS DOS PROTECCIONES VAN EN EL WHERE, NO EN MEMORIA
+ * `gt('kickoff_at', ahora)` es lo que impide mover un partido ya empezado, y se
+ * evalua en Postgres: entre leer y escribir cabe justo el instante del pitido
+ * inicial. Si el UPDATE afecta a 0 filas, el partido arranco mientras se
+ * guardaba, que es exactamente cuando NO hay que tocarlo. Mover hacia adelante
+ * un partido empezado volveria a esconder pronosticos que la peña ya vio.
+ * La segunda proteccion es RLS (`matches_write_admin`), que es la de verdad.
+ */
+export async function saveKickoffsAction(_prev: SaveState, formData: FormData): Promise<SaveState> {
+  const context = await adminContext()
+  if (context.kind === 'denied') return { ok: false, error: DENIED }
+
+  let rows: KickoffInput[]
+  try {
+    rows = JSON.parse(String(formData.get('kickoffs') ?? '[]')) as KickoffInput[]
+  } catch {
+    return { ok: false, error: 'No hemos podido leer los horarios.' }
+  }
+  if (!Array.isArray(rows)) return { ok: false, error: 'No hemos podido leer los horarios.' }
+
+  const nowMs = Date.now()
+  const fixed: Array<{ id: string; kickoffAt: string }> = []
+  const released: string[] = []
+
+  for (const row of rows) {
+    const id = String(row?.id ?? '')
+    if (id === '') return { ok: false, error: 'No hemos podido leer los horarios.' }
+
+    if (!row.manual) {
+      released.push(id)
+      continue
+    }
+
+    if (!DAY_RE.test(String(row.day)) || !TIME_RE.test(String(row.time))) {
+      return { ok: false, error: 'Hay una fecha u hora que no vale.' }
+    }
+
+    // La hora de pared la interpreta el SERVIDOR: el navegador puede tener otro
+    // huso y de `kickoff_at` cuelga el cierre del pronostico.
+    const kickoffAt = madridWallToUtc(row.day, row.time)
+    const ms = Date.parse(kickoffAt)
+    if (!Number.isFinite(ms)) return { ok: false, error: 'Hay una fecha u hora que no vale.' }
+
+    // Poner una hora ya pasada sellaria el partido al instante y destaparia los
+    // pronosticos de todos. Nunca es lo que se quiere.
+    if (ms <= nowMs) return { ok: false, error: 'La hora nueva tiene que ser futura.' }
+
+    fixed.push({ id, kickoffAt })
+  }
+
+  if (context.kind === 'db') {
+    const nowIso = new Date(nowMs).toISOString()
+
+    for (const match of fixed) {
+      const { data, error } = await context.supabase
+        .from('matches')
+        .update({
+          kickoff_at: match.kickoffAt,
+          kickoff_source: 'admin',
+          // Una hora puesta por el organizador es definitiva: fuera el
+          // "Por confirmar" que pinta /jornada.
+          kickoff_provisional: false,
+        })
+        .eq('id', match.id)
+        .gt('kickoff_at', nowIso)
+        .select('id')
+
+      if (error) return { ok: false, error: kickoffWriteError(error) }
+      if (!data || data.length === 0) {
+        return { ok: false, error: 'Ese partido ya ha empezado: su hora no se puede mover.' }
+      }
+    }
+
+    if (released.length > 0) {
+      // Solo se suelta el mando: `kickoff_at` se deja como esta y la siguiente
+      // pasada del cron trae la hora oficial. Escribir aqui una hora "de la API"
+      // seria inventarla, porque en este momento no la tenemos.
+      const { error } = await context.supabase
+        .from('matches')
+        .update({ kickoff_source: 'api' })
+        .in('id', released)
+        .eq('kickoff_source', 'admin')
+      if (error) return { ok: false, error: kickoffWriteError(error) }
+    }
+  }
+
+  // La hora cambia el orden y el contador de /jornada, y el estado del partido.
+  revalidatePath('/ajustes/admin')
+  revalidatePath('/jornada')
+  revalidatePath('/clasificacion')
+  return { ok: true, error: null }
+}
+
+function kickoffWriteError(error: { code?: string }): string {
+  // 42703 / PGRST204 = falta la columna: la migracion 0016 no se ha aplicado.
+  if (error.code === '42703' || error.code === 'PGRST204') {
+    return 'Falta aplicar la migración 0016 en la base de datos.'
+  }
+  if (error.code === '42501') return DENIED
+  return 'No hemos podido guardar los horarios.'
 }
