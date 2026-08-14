@@ -59,10 +59,26 @@ export async function confirmAction(formData: FormData): Promise<never> {
   if (typeof type !== 'string' || !ALLOWED_TYPES.has(type)) redirect('/auth/error?reason=invalid')
 
   const supabase = await createClient()
-  const { error } = await supabase.auth.verifyOtp({
+  let { error } = await supabase.auth.verifyOtp({
     type: type as EmailOtpType,
     token_hash: tokenHash as string,
   })
+
+  // Reintento con 'email' cuando venia 'magiclink'.
+  //
+  // El Supabase de la nube RECHAZA type=magiclink para un token_hash y solo
+  // acepta type=email; el de Docker acepta los dos. Comprobado contra el
+  // proyecto real, tres de tres: magiclink -> 403 otp_expired, email -> 200.
+  // La plantilla de correo ya manda type=email y por ahi todo el mundo entro
+  // bien, pero hay enlaces hechos a mano con type=magiclink circulando por
+  // WhatsApp. Sin esto son papel mojado y hay que reemitirlos uno a uno.
+  if (error && type === 'magiclink') {
+    ;({ error } = await supabase.auth.verifyOtp({
+      type: 'email',
+      token_hash: tokenHash as string,
+    }))
+  }
+
   if (error) redirect('/auth/error?reason=expired')
 
   // Ruta RELATIVA a proposito: el navegador la resuelve contra el host por el
