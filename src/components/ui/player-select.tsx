@@ -31,6 +31,15 @@ export interface PlayerSelectProps {
    */
   suggestions?: string[]
   onToggle: (player: string) => void
+  /**
+   * Cuantos se pueden marcar como mucho. En Goleadores y Asistentes son los
+   * goles del propio pronostico: no se pueden listar cinco goleadores para un
+   * 1-1, que era como se sacaban puntos a base de cantidad.
+   *
+   * Llegado al tope solo se puede QUITAR. Desmarcar sigue funcionando siempre,
+   * que si no te quedas encerrado sin poder corregir.
+   */
+  max?: number
   /** Texto del disparador cuando no hay nada elegido. */
   emptyLabel?: string
   /** Hueco bajo el disparador. Lo ocupa el boton «sin goles» en Goleadores. */
@@ -77,6 +86,7 @@ export function PlayerSelect({
   multiple,
   suggestions = [],
   onToggle,
+  max,
   emptyLabel = 'Elegir jugador',
   children,
 }: PlayerSelectProps) {
@@ -168,7 +178,15 @@ export function PlayerSelect({
     }
   }, [open, close])
 
+  /** true cuando ya no caben mas y este no esta marcado: solo se puede quitar. */
+  function bloqueado(player: string): boolean {
+    if (max === undefined) return false
+    if (selected.some((chosen) => samePlayer(chosen, player))) return false
+    return selected.length >= max
+  }
+
   function pick(player: string) {
+    if (bloqueado(player)) return
     onToggle(player)
     // En seleccion unica la eleccion agota el dialogo; en multiple se sigue
     // marcando sin tener que reabrir.
@@ -329,10 +347,15 @@ export function PlayerSelect({
                             key={player}
                             type="button"
                             aria-pressed={on}
+                            // Atenuado y no oculto: si desaparecieran, parecerian
+                            // jugadores que no juegan. Asi se ve que estan pero
+                            // que ya no caben mas.
+                            disabled={bloqueado(player)}
                             onClick={() => pick(player)}
                             className={cn(
                               'flex min-h-[48px] items-center gap-[11px] rounded-[12px] px-[10px] text-left',
                               'transition-transform duration-100 active:scale-[.99]',
+                              'disabled:pointer-events-none disabled:opacity-40',
                               on && 'bg-accent-soft',
                             )}
                           >

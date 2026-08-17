@@ -57,23 +57,38 @@ function toggle(list: string[], player: string): string[] {
     : [...list, player]
 }
 
+/**
+ * Recorta goleadores y asistentes a los goles del marcador.
+ *
+ * Hace falta al BAJAR el marcador: si eliges tres goleadores para un 2-1 y luego
+ * lo cambias a 1-0, la lista se pasa del tope y el guardado la rechazaria con un
+ * error que desde la pantalla no se entiende. Se quitan los ULTIMOS elegidos,
+ * que es lo que uno espera al deshacer.
+ */
+function trimToScore(state: DraftState, home: number, away: number): DraftState {
+  const cabe = home + away
+  const scorers = state.scorers.length > cabe ? state.scorers.slice(0, cabe) : state.scorers
+  const assists = state.assists.length > cabe ? state.assists.slice(0, cabe) : state.assists
+  return { ...state, home, away, scorers, assists }
+}
+
 export function draftReducer(state: DraftState, action: DraftAction): DraftState {
   switch (action.type) {
     case 'setGoals': {
       const value = clampGoals(action.value)
-      if (action.side === 'home') {
-        return state.home === value ? state : { ...state, home: value }
-      }
-      return state.away === value ? state : { ...state, away: value }
+      const home = action.side === 'home' ? value : state.home
+      const away = action.side === 'away' ? value : state.away
+      if (state.home === home && state.away === away) return state
+      return trimToScore(state, home, away)
     }
 
     case 'setScore': {
       const home = clampGoals(action.home)
       const away = clampGoals(action.away)
       if (state.home === home && state.away === away) return state
-      // Los marcadores rapidos fijan el marcador y NO tocan MVP, goleadores ni
-      // asistentes.
-      return { ...state, home, away }
+      // Los marcadores rapidos fijan el marcador y NO tocan MVP. Goleadores y
+      // asistentes solo se tocan si ya no caben.
+      return trimToScore(state, home, away)
     }
 
     case 'toggleMvp':

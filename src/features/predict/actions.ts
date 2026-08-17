@@ -168,6 +168,33 @@ export async function savePredictionAction(
     return { ok: false, error: 'No puedes marcar «sin goles» y goleadores o asistentes a la vez.' }
   }
 
+  // NADIE PUEDE LISTAR MAS GOLEADORES QUE GOLES.
+  //
+  // Sin esto se sacaban puntos a base de cantidad: pones 1-2 y sueltas doce
+  // nombres, y cada acierto suma aunque el marcador no tenga nada que ver.
+  // Medido el 17/08/2026 sobre la jornada 1: cuatro pronosticos con un goleador
+  // y un asistente de mas cada uno, todos de la misma persona.
+  //
+  // El tope son los goles del PROPIO pronostico, no los del partido: se valida
+  // cuando se guarda y entonces el resultado no existe todavia. Y es coherente
+  // con lo que se apuesta -- si dices 1-2, estas diciendo que hay tres goles.
+  //
+  // Las asistencias van por el mismo tope y no por el numero de goleadores: un
+  // gol puede no tener asistencia, pero no puede tener dos.
+  const totalGoals = home + away
+  if (scorers.length > totalGoals) {
+    return {
+      ok: false,
+      error: `Has puesto ${scorers.length} goleadores para un ${home}-${away}. Como mucho ${totalGoals}.`,
+    }
+  }
+  if (assists.length > totalGoals) {
+    return {
+      ok: false,
+      error: `Has puesto ${assists.length} asistentes para un ${home}-${away}. Como mucho ${totalGoals}.`,
+    }
+  }
+
   if (!supabase) {
     // ---------------------------------------------------------------- seco ---
     const editor = await getMatchEditor(matchId)

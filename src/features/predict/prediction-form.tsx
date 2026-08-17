@@ -52,6 +52,15 @@ export function PredictionForm({ editor }: PredictionFormProps) {
 
   const noGoalsLabel = draft.noGoals ? 'Sin goles · nadie marca ni asiste' : 'Marcar «sin goles»'
 
+  /**
+   * Tope de goleadores y de asistentes: los goles de TU pronostico.
+   *
+   * Sin esto se sacaban puntos a base de cantidad -- poner 1-2 y soltar doce
+   * nombres, porque cada acierto sumaba igual. El servidor y la base tambien lo
+   * rechazan; aqui se evita ademas que se pueda llegar a intentar.
+   */
+  const totalGoles = draft.home + draft.away
+
   return (
     <form action={formAction}>
       <input type="hidden" name="matchId" value={match.id} />
@@ -87,7 +96,8 @@ export function PredictionForm({ editor }: PredictionFormProps) {
 
         <PlayerSelect
           label="Goleadores"
-          hint={`+${scoring.scorer} pts por acierto`}
+          hint={`${draft.scorers.length}/${totalGoles} · +${scoring.scorer} pts`}
+          max={totalGoles}
           squads={squads}
           suggestions={suggestions}
           selected={draft.scorers}
@@ -114,7 +124,8 @@ export function PredictionForm({ editor }: PredictionFormProps) {
 
         <PlayerSelect
           label="Asistentes"
-          hint={`+${scoring.assist} pts por acierto`}
+          hint={`${draft.assists.length}/${totalGoles} · +${scoring.assist} pts`}
+          max={totalGoles}
           squads={squads}
           suggestions={suggestions}
           selected={draft.assists}
