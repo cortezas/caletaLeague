@@ -40,6 +40,13 @@ export interface PlayerSelectProps {
    * que si no te quedas encerrado sin poder corregir.
    */
   max?: number
+  /**
+   * Quita UNA aparicion del jugador. Sin esto no habria forma de bajar un
+   * doblete a un gol, porque pulsar la fila ahora SUMA.
+   *
+   * Solo en modo multiple: en el MVP `onToggle` ya desmarca.
+   */
+  onRemove?: (player: string) => void
   /** Texto del disparador cuando no hay nada elegido. */
   emptyLabel?: string
   /** Hueco bajo el disparador. Lo ocupa el boton «sin goles» en Goleadores. */
@@ -87,6 +94,7 @@ export function PlayerSelect({
   suggestions = [],
   onToggle,
   max,
+  onRemove,
   emptyLabel = 'Elegir jugador',
   children,
 }: PlayerSelectProps) {
@@ -209,8 +217,25 @@ export function PlayerSelect({
     pick(known)
   }
 
-  const shown = multiple ? selected.slice(0, TRIGGER_CHIPS) : selected
-  const rest = multiple ? selected.length - shown.length : 0
+  /**
+   * Los elegidos AGRUPADOS: un doblete es un chip con «x2», no dos chips
+   * iguales. Ademas, dos chips con el mismo nombre chocarian de `key` en React.
+   * Se conserva el orden de la primera aparicion.
+   */
+  const agrupados = useMemo(() => {
+    const out: Array<{ name: string; veces: number }> = []
+    for (const name of selected) {
+      const ya = out.find((item) => samePlayer(item.name, name))
+      if (ya) ya.veces += 1
+      else out.push({ name, veces: 1 })
+    }
+    return out
+  }, [selected])
+
+  const shown = multiple ? agrupados.slice(0, TRIGGER_CHIPS) : agrupados
+  // Los que no caben, contados por JUGADOR y no por gol: «+2 más» son dos
+  // nombres, no dos goles del mismo.
+  const rest = multiple ? agrupados.length - shown.length : 0
 
   return (
     <Card radius={22} elevated as="section" className="px-[15px] py-[16px]">
@@ -237,12 +262,12 @@ export function PlayerSelect({
           <span className="min-w-0 flex-1 text-[14.5px] font-semibold text-txt3">{emptyLabel}</span>
         ) : (
           <span className="flex min-w-0 flex-1 flex-wrap items-center gap-[6px]">
-            {shown.map((name) => (
+            {shown.map(({ name, veces }) => (
               <span
                 key={name}
                 className="max-w-full truncate rounded-[9px] bg-accent-soft px-[9px] py-[5px] text-[13px] font-bold text-accent2"
               >
-                {name}
+                {veces > 1 ? `${name} x${veces}` : name}
               </span>
             ))}
             {rest > 0 && (
@@ -341,10 +366,11 @@ export function PlayerSelect({
                   ) : (
                     <div className="flex flex-col">
                       {group.players.map((player) => {
-                        const on = selected.some((name) => samePlayer(name, player))
+                        const veces = selected.filter((name) => samePlayer(name, player)).length
+                        const on = veces > 0
                         return (
+                          <div key={player} className="flex items-center gap-[6px]">
                           <button
-                            key={player}
                             type="button"
                             aria-pressed={on}
                             // Atenuado y no oculto: si desaparecieran, parecerian
@@ -353,7 +379,7 @@ export function PlayerSelect({
                             disabled={bloqueado(player)}
                             onClick={() => pick(player)}
                             className={cn(
-                              'flex min-h-[48px] items-center gap-[11px] rounded-[12px] px-[10px] text-left',
+                              'flex min-h-[48px] min-w-0 flex-1 items-center gap-[11px] rounded-[12px] px-[10px] text-left',
                               'transition-transform duration-100 active:scale-[.99]',
                               'disabled:pointer-events-none disabled:opacity-40',
                               on && 'bg-accent-soft',
@@ -372,8 +398,33 @@ export function PlayerSelect({
                                 a mano
                               </span>
                             )}
+                            {/* Cuantos goles suyos llevas. Solo desde dos: un "x1"
+                                en cada fila marcada seria ruido. */}
+                            {veces > 1 && (
+                              <span className="flex-none rounded-[7px] bg-accent px-[7px] py-[2px] font-num text-[12px] font-extrabold text-accent-ink">
+                                x{veces}
+                              </span>
+                            )}
                             <Mark on={on} multiple={multiple} />
                           </button>
+
+                          {/* Quitar UNA. Va fuera del boton de anadir porque
+                              anidar botones no es HTML valido, y porque con la
+                              lista llena el de anadir esta deshabilitado y aun
+                              asi hay que poder rectificar. */}
+                          {multiple && on && onRemove && (
+                            <button
+                              type="button"
+                              onClick={() => onRemove(player)}
+                              aria-label={
+                                veces > 1 ? `Quitar un gol de ${player}` : `Quitar a ${player}`
+                              }
+                              className="flex size-[38px] flex-none items-center justify-center rounded-[11px] border border-line text-txt3 transition-transform duration-100 active:scale-[.94]"
+                            >
+                              <X size={15} strokeWidth={2.4} aria-hidden />
+                            </button>
+                          )}
+                          </div>
                         )
                       })}
                     </div>

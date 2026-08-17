@@ -54,16 +54,28 @@ function parsePlayerList(raw: FormDataEntryValue | null): string[] | null {
   )
   if (!ok) return null
 
-  // Deduplicado por nombre normalizado, no por cadena exacta: "Mbappe" y
-  // "Mbappé" son el mismo gol y contarlos dos veces inflaria los puntos.
+  // NO se deduplica: un jugador puede marcar dos veces, y repetirlo es como se
+  // dice "doblete". Antes se colapsaba, asi que acertar un doblete pagaba igual
+  // que acertar un gol. Los puntos se cuentan por veces (`calc_points`, 0022) y
+  // pasarse no infla nada, porque se toma el minimo de las dos listas.
+  //
+  // Repetir NO es gratis: el tope de la 0021 solo deja tantos goleadores como
+  // goles tiene el pronostico, asi que un "Ayoze x3" gasta tres huecos de un
+  // 3-0.
+  //
+  // Lo que si se unifica es la ORTOGRAFIA: la primera forma que llega manda, y
+  // "Mbappe" escrito despues de "Mbappé" se guarda como "Mbappé". Sin esto, dos
+  // grafias del mismo nombre se cuentan aparte al comparar por texto en las
+  // pantallas, aunque el calculo de puntos si las normalice.
   const out: string[] = []
-  const seen = new Set<string>()
+  const canon = new Map<string, string>()
   for (const raw2 of parsed as string[]) {
     const name = tidy(raw2)
     const key = normalizePlayer(name)
-    if (key === '' || seen.has(key)) continue
-    seen.add(key)
-    out.push(name)
+    if (key === '') continue
+    const first = canon.get(key)
+    if (first === undefined) canon.set(key, name)
+    out.push(first ?? name)
   }
   return out
 }

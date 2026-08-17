@@ -32,8 +32,13 @@ export type DraftAction =
   | { type: 'setGoals'; side: 'home' | 'away'; value: number }
   | { type: 'setScore'; home: number; away: number }
   | { type: 'toggleMvp'; player: string }
+  // `toggle*` SUMA una aparicion (asi se dice "doblete"); `remove*` quita una.
+  // Se separan porque desde la lista se añade y desde el chip se quita, y con
+  // una sola accion no habria forma de bajar un doblete a un gol.
   | { type: 'toggleScorer'; player: string }
+  | { type: 'removeScorer'; player: string }
   | { type: 'toggleAssist'; player: string }
+  | { type: 'removeAssist'; player: string }
   | { type: 'toggleNoGoals' }
 
 /** Clamp 0..9 con truncado: el valor puede llegar de un input o de un marcador rapido. */
@@ -43,18 +48,32 @@ function clampGoals(value: number): number {
 }
 
 /**
- * Quita si estaba, anade al final si no. Misma regla en goleadores y asistentes.
+ * Suma UNA aparicion del jugador.
+ *
+ * Tocar a alguien ya marcado ANADE otro gol suyo; asi es como se dice "doblete".
+ * Antes lo quitaba, y por eso un doblete no se podia ni escribir -- y quien
+ * acertaba uno cobraba lo mismo que quien decia que marcaba una vez.
+ *
+ * Respeta el tope de goles del pronostico, el mismo que aplican el servidor y la
+ * base (migracion 0021): con la lista llena, la pulsacion no hace nada. Quitar
+ * es cosa de `removeOne`, que siempre esta disponible desde la hoja.
  *
  * Se compara con `samePlayer` y no con `===` porque `<PlayerSelect>` marca las
- * filas con esa misma regla: un nombre guardado como "Mbappe" que luego aparece
- * en la plantilla como "Mbappé" sale marcado en la hoja, y con igualdad exacta
- * volver a tocarlo lo anadiria en vez de quitarlo. El panel de organizador ya
- * togglea asi (`admin-result-form.tsx`).
+ * filas con esa misma regla, y ademas se reutiliza la ortografia ya presente:
+ * pulsar "Mbappe" cuando la lista tiene "Mbappé" guarda la segunda igual que la
+ * primera, que es como se comparan luego en las pantallas.
  */
-function toggle(list: string[], player: string): string[] {
-  return list.some((name) => samePlayer(name, player))
-    ? list.filter((name) => !samePlayer(name, player))
-    : [...list, player]
+function addOne(list: string[], player: string, state: DraftState): string[] {
+  if (list.length >= state.home + state.away) return list
+  const yaEsta = list.find((name) => samePlayer(name, player))
+  return [...list, yaEsta ?? player]
+}
+
+/** Quita UNA aparicion, la ultima. Con un doblete, la primera pulsacion lo baja a un gol. */
+function removeOne(list: string[], player: string): string[] {
+  const i = list.map((name) => samePlayer(name, player)).lastIndexOf(true)
+  if (i === -1) return list
+  return [...list.slice(0, i), ...list.slice(i + 1)]
 }
 
 /**
@@ -95,26 +114,20 @@ export function draftReducer(state: DraftState, action: DraftAction): DraftState
       // Seleccion unica y deseleccionable: volver a tocar al elegido lo quita.
       return { ...state, mvp: samePlayer(state.mvp, action.player) ? null : action.player }
 
-    case 'toggleScorer': {
-      const on = state.scorers.some((name) => samePlayer(name, action.player))
-      // Marcar un goleador apaga "sin goles"; quitarlo no lo vuelve a encender.
-      return {
-        ...state,
-        scorers: toggle(state.scorers, action.player),
-        noGoals: on ? state.noGoals : false,
-      }
-    }
+    case 'toggleScorer':
+      // Anadir un goleador apaga "sin goles"; quitarlo no lo vuelve a encender.
+      return { ...state, scorers: addOne(state.scorers, action.player, state), noGoals: false }
 
-    case 'toggleAssist': {
-      const on = state.assists.some((name) => samePlayer(name, action.player))
-      // Un pase de gol implica un gol: marcar asistente apaga "sin goles" igual
-      // que marcar goleador.
-      return {
-        ...state,
-        assists: toggle(state.assists, action.player),
-        noGoals: on ? state.noGoals : false,
-      }
-    }
+    case 'removeScorer':
+      return { ...state, scorers: removeOne(state.scorers, action.player) }
+
+    case 'toggleAssist':
+      // Un pase de gol implica un gol: anadir asistente apaga "sin goles" igual
+      // que anadir goleador.
+      return { ...state, assists: addOne(state.assists, action.player, state), noGoals: false }
+
+    case 'removeAssist':
+      return { ...state, assists: removeOne(state.assists, action.player) }
 
     case 'toggleNoGoals': {
       const noGoals = !state.noGoals

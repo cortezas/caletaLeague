@@ -104,6 +104,7 @@ export function PredictionForm({ editor }: PredictionFormProps) {
           multiple
           emptyLabel="Elegir goleadores"
           onToggle={(player) => dispatch({ type: 'toggleScorer', player })}
+          onRemove={(player) => dispatch({ type: 'removeScorer', player })}
         >
           <button
             type="button"
@@ -132,6 +133,7 @@ export function PredictionForm({ editor }: PredictionFormProps) {
           multiple
           emptyLabel="Elegir asistentes"
           onToggle={(player) => dispatch({ type: 'toggleAssist', player })}
+          onRemove={(player) => dispatch({ type: 'removeAssist', player })}
         />
 
         <div className="flex gap-[9px] rounded-[16px] border border-line bg-accent-soft px-[14px] py-[12px]">

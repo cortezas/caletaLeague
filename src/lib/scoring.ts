@@ -36,22 +36,41 @@ export interface MatchBreakdown {
   points: number
 }
 
+/** Cuantas veces aparece cada nombre, ya normalizado. */
+function countByPlayer(list: PlayerName[]): Map<string, number> {
+  const out = new Map<string, number>()
+  for (const name of list) {
+    const key = normalizePlayer(name)
+    if (key === '') continue
+    out.set(key, (out.get(key) ?? 0) + 1)
+  }
+  return out
+}
+
 /**
- * Cuantos nombres de `picked` estan en `real`.
+ * Aciertos de `picked` contra `real`, CONTANDO LAS VECES.
  *
- * Deduplica por nombre NORMALIZADO: si alguien escribe "Mbappe" y "Mbappé" en el
- * mismo pronostico es un jugador, no dos, y contarlo dos veces inflaria los puntos.
- * Las listas de goleadores y de asistentes se cuentan por separado: el mismo
- * jugador puede marcar Y asistir en un partido, y son dos aciertos legitimos.
+ * Un jugador que marca dos goles vale por dos. Antes esto deduplicaba, asi que
+ * quien acertaba un doblete cobraba lo mismo que quien decia que marcaba una
+ * vez -- y el doblete ni siquiera se podia escribir en el editor.
+ *
+ * Se cuenta el MINIMO de las dos listas por jugador: decir "Ayoze x3" cuando
+ * marco dos son dos aciertos, no tres. Los nombres de mas no restan, pero
+ * tampoco suman, y el tope de goleadores (migracion 0021) ya impide llenar la
+ * lista con el mismo nombre para probar suerte.
+ *
+ * Normaliza: "Mbappe" y "Mbappé" son el mismo jugador. Goleadores y asistentes
+ * se cuentan por separado -- el mismo jugador puede marcar Y asistir, y son dos
+ * aciertos legitimos.
+ *
+ * ESPEJO EXACTO de `public.calc_points` (migracion 0022). Si se toca una, se
+ * toca la otra.
  */
 function countHits(picked: PlayerName[], real: PlayerName[]): number {
-  const seen = new Set<string>()
+  const reales = countByPlayer(real)
   let hits = 0
-  for (const name of picked) {
-    const key = normalizePlayer(name)
-    if (key === '' || seen.has(key)) continue
-    seen.add(key)
-    if (real.some((r) => samePlayer(name, r))) hits += 1
+  for (const [key, veces] of countByPlayer(picked)) {
+    hits += Math.min(veces, reales.get(key) ?? 0)
   }
   return hits
 }
