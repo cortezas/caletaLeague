@@ -6,6 +6,7 @@ import { notFound } from 'next/navigation'
 import { EmptyState, ProgressBar } from '@/components/ui'
 import { GameweekHeader, SecretBanner } from '@/features/jornada/gameweek-header'
 import { MatchRow } from '@/features/jornada/match-row'
+import { LineupWarmer } from '@/features/lineups/lineup-warmer'
 import { requireMember } from '@/lib/auth'
 import { getActiveGameweek, getGameweek } from '@/lib/data'
 import type { GameweekVM } from '@/lib/view-models'
@@ -72,8 +73,18 @@ export default async function JornadaPage({
   const playedCount = gameweek.matches.filter((m) => m.status === 'played').length
   const gameweekPoints = gameweek.matches.reduce((sum, m) => sum + (m.myPoints ?? 0), 0)
 
+  // El partido mas proximo que todavia no ha empezado. Es el unico que hace
+  // falta nombrar: la ruta de refresco barre la ventana entera y de paso deja
+  // listos los que arrancan detras.
+  const proximo = gameweek.matches.find((match) => match.status === 'open')
+
   return (
     <>
+      {/* Sin esto la alineacion solo se pedia al abrir un partido concreto, y la
+          peña vive en esta lista: en la jornada 1 llegaron entre 3 y 14 minutos
+          antes del pitido, cuando ya no daba tiempo a mirar nada. */}
+      {proximo && <LineupWarmer matchId={proximo.id} kickoffAt={proximo.kickoffAt} />}
+
       <GameweekHeader gameweek={gameweek} />
 
       <div className="px-[14px] pt-[14px] pb-[26px] lg:grid lg:grid-cols-[minmax(0,1fr)_284px] lg:items-start lg:gap-[20px] lg:px-[24px] lg:pt-[22px]">

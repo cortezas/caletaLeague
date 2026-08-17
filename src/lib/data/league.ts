@@ -110,6 +110,40 @@ type MemberRow = {
   leagues: LeagueEmbed
 }
 
+/**
+ * Sin fila de miembro hay DOS casos que se ven igual desde aqui y que necesitan
+ * salidas opuestas:
+ *
+ *   - de verdad no perteneces a ninguna peña  -> /onboarding, a meter el codigo;
+ *   - la sesion no llega a la base de datos   -> /login, a volver a entrar.
+ *
+ * El segundo pasa cuando el token que viaja a PostgREST esta caducado o no
+ * llega: el refresco vive en el proxy, y si falla (token rotado por otra
+ * pestaña, la app abierta desde el viernes) `getClaims()` sigue devolviendo un
+ * `sub` de la cookie pero `auth.uid()` es NULL. Con NULL la RLS de `members` no
+ * devuelve ni una fila, exactamente igual que si no fueras miembro.
+ *
+ * Distinguirlos no es cosmetico: el fin de semana del 15-17/08/2026 esto dejo a
+ * gente con ficha desde el dia 12 mirando la pantalla del codigo de invitacion,
+ * que no arregla nada. Un callejon sin salida del que no se sale ni cerrando la
+ * app.
+ *
+ * `current_uid()` (migracion 0020) pregunta quien eres PARA LA BASE. Solo se
+ * llama aqui, en el camino de fallo, cuando ya ibamos a redirigir igualmente.
+ */
+async function missingMemberError(supabase: DataContext['supabase']): Promise<NoMemberError> {
+  const { data, error } = await supabase.rpc('current_uid')
+
+  // Si la propia comprobacion falla, se asume lo mas probable y lo menos dañino:
+  // mandar a /login como mucho pide entrar otra vez; mandar a /onboarding a
+  // quien ya es miembro no tiene salida.
+  if (error || !data) {
+    return new NoMemberError('Se ha caído la sesión. Vuelve a entrar.', 'no-session')
+  }
+
+  return new NoMemberError('Tu cuenta todavía no pertenece a ninguna peña.', 'no-member')
+}
+
 /** `leagues.scoring` es jsonb: puede venir con claves de menos o basura. */
 function scoringOf(raw: unknown): Scoring {
   const src = (raw ?? {}) as Record<string, unknown>
@@ -156,7 +190,7 @@ export const getDataContext = cache(async (): Promise<DataContext | null> => {
 
   const rows = (data ?? []) as unknown as MemberRow[]
   const mine = rows.find((row) => row.user_id === userId)
-  if (!mine) throw new NoMemberError('Tu cuenta todavía no pertenece a ninguna peña.', 'no-member')
+  if (!mine) throw await missingMemberError(supabase)
 
   const league = mine.leagues
 
