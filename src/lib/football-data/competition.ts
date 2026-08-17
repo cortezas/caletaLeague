@@ -441,8 +441,32 @@ export async function syncCompetition(
     // partidos jugados. No es un error y se guarda igual (se corrige sola en
     // cuanto ruede el balon), pero el informe tiene que decirlo.
     const currentMatchday = standingsPayload.season?.currentMatchday ?? null
-    const anyPlayed = table.some((row) => toInt(row.playedGames, 0) > 0)
-    report.looksPreviousSeason = anyPlayed && currentMatchday !== null && currentMatchday <= 1
+
+    // COMO SE DISTINGUE LA TABLA VIEJA DE LA NUEVA
+    //
+    // La primera version preguntaba "hay algun equipo con partidos jugados y
+    // currentMatchday <= 1". Eso funciono hasta que empezo la liga, y entonces
+    // se volvio en contra: el 15/08/2026 se jugaron cuatro partidos de la
+    // jornada 1, la API siguio diciendo `currentMatchday: 1` (la jornada no
+    // habia terminado) y esos cuatro resultados hicieron que la condicion se
+    // cumpliera. Resultado: la pestaña LaLiga sembrando ceros durante todo el
+    // fin de semana con la tabla buena delante.
+    //
+    // La señal correcta es una imposibilidad aritmetica: NADIE puede haber
+    // jugado mas partidos que jornadas van disputadas. Con la tabla del año
+    // pasado son 38 contra 1 y salta; dentro de la jornada 1 es 1 contra 1 y no
+    // salta. No hay zona gris.
+    const impossiblePlayed =
+      currentMatchday !== null &&
+      table.some((row) => toInt(row.playedGames, 0) > currentMatchday)
+
+    // Señal de respaldo para cuando la API no manda `currentMatchday`. Se exigen
+    // TRES porque cada verano suben y bajan tres: uno o dos equipos sin mapear
+    // son un rebautizo, y ese caso ya se trata fila a fila mas abajo sin tirar
+    // la tabla entera.
+    const outsiders = table.filter((row) => resolveTeamById(row.team) === null).length
+
+    report.looksPreviousSeason = impossiblePlayed || outsiders >= 3
 
     const standingRows: StandingRow[] = []
     const seenCodes = new Set<TeamCode>()
