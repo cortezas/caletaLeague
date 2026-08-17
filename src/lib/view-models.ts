@@ -152,7 +152,39 @@ export type GameweekStandingsVM = {
     position: number; memberId: string; displayName: string; avatarColor: string; avatarUrl: string | null; points: number; isMe: boolean
     breakdown: Array<{ matchId: string; label: string; myScore: string; realScore: string; points: number }>
     pendingCount: number
+    /**
+     * Lo que paga en ESTA jornada: 3 el ultimo, 2 el penultimo, 1 el
+     * antepenultimo. `null` cuando no le toca pagar o cuando la jornada no ha
+     * acabado todavia.
+     *
+     * `null` y no 0 a proposito: un 0 se leeria como "paga cero euros", que no
+     * es lo mismo que "no le toca". La regla y el desempate viven en
+     * `src/lib/dues.ts`.
+     */
+    euros: number | null
   }>
+}
+
+/**
+ * El bote: lo que lleva pagado cada uno en la temporada.
+ *
+ * Los tres ultimos de cada jornada pagan 3, 2 y 1 euro. Solo cuentan las
+ * jornadas ACABADAS, asi que todo a cero es el estado normal hasta que se juegue
+ * la primera entera.
+ *
+ * Ordenado de MAS a MENOS deuda: la lista existe para ver quien va pagando, no
+ * para repetir la clasificacion.
+ */
+export type SeasonDuesVM = {
+  rows: Array<{
+    memberId: string
+    displayName: string
+    avatarColor: string
+    avatarUrl: string | null
+    euros: number
+    isMe: boolean
+  }>
+  total: number
 }
 
 export type ProfileVM = {

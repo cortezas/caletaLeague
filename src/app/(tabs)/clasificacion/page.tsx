@@ -4,6 +4,7 @@ import Link from 'next/link'
 
 import { EmptyState, ScreenHeader } from '@/components/ui'
 import { CompetitionTable } from '@/features/standings/competition-table'
+import { SeasonDues } from '@/features/standings/season-dues'
 import { TopScorers } from '@/features/standings/top-scorers'
 import { HeadToHead } from '@/features/standings/head-to-head'
 import { Podium } from '@/features/standings/podium'
@@ -13,6 +14,7 @@ import {
   getActiveGameweek,
   getCompetitionStandings,
   getHeadToHead,
+  getSeasonDues,
   getSeasonStandings,
   getTopScorers,
 } from '@/lib/data'
@@ -60,9 +62,10 @@ export default async function ClasificacionPage({
 
   const vista = parseVista((await searchParams).vista)
 
-  const [gameweek, standings, competition, scorers, h2h] = await Promise.all([
+  const [gameweek, standings, dues, competition, scorers, h2h] = await Promise.all([
     getActiveGameweek(),
     vista === 'general' ? getSeasonStandings() : null,
+    vista === 'general' ? getSeasonDues() : null,
     vista === 'laliga' ? getCompetitionStandings() : null,
     vista === 'laliga' ? getTopScorers(20) : null,
     vista === 'cara-a-cara' ? getHeadToHead() : null,
@@ -127,13 +130,18 @@ export default async function ClasificacionPage({
             description="En cuanto se juegue el primer partido de la peña, aquí aparece quién manda."
           />
         ) : (
-          <div className="px-[14px] pt-[18px] pb-[30px]">
-            <Podium rows={podium} />
-            <ul className="flex flex-col gap-[6px]">
-              {rest.map((row) => (
-                <StandingsRow key={row.memberId} row={row} />
-              ))}
-            </ul>
+          <div className="flex flex-col gap-[14px] px-[14px] pt-[18px] pb-[30px]">
+            <div>
+              <Podium rows={podium} />
+              <ul className="flex flex-col gap-[6px]">
+                {rest.map((row) => (
+                  <StandingsRow key={row.memberId} row={row} />
+                ))}
+              </ul>
+            </div>
+            {/* El bote va aqui y no en una quinta pestaña: el segmentado ya lleva
+                cuatro y en movil no cabe otra. Misma decision que el Pichichi. */}
+            {dues && <SeasonDues dues={dues} />}
           </div>
         ))}
     </>

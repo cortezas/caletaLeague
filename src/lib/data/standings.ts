@@ -13,8 +13,9 @@
  * ni un punto.
  */
 
+import { duesForGameweek } from '../dues'
 import { scoreLabel } from '../format'
-import type { GameweekStandingsVM, StandingsVM } from '../view-models'
+import type { GameweekStandingsVM, SeasonDuesVM, StandingsVM } from '../view-models'
 import {
   effectiveStatus,
   fetchMatchRows,
@@ -151,7 +152,9 @@ export async function getGameweekStandings(n: number): Promise<GameweekStandings
     playedIds.length > 0
       ? ctx.supabase
           .from('prediction_points')
-          .select('match_id, member_id, points')
+          // `sign_hit` entra por el desempate de los pagos: con puntuaciones
+          // bajas el empate abajo es el caso normal, no la excepcion.
+          .select('match_id, member_id, points, sign_hit')
           .in('match_id', playedIds)
       : null,
   ])
@@ -188,6 +191,37 @@ export async function getGameweekStandings(n: number): Promise<GameweekStandings
 
   const pendingCount = matches.length - playedMatches.length
 
+  /**
+   * Los pagos SOLO con la jornada entera jugada. Señalar al ultimo a media
+   * jornada genera piques por nada, y el orden de abajo se mueve con cada
+   * partido que entra.
+   */
+  const complete = matches.length > 0 && pendingCount === 0
+
+  const predictionsMade = new Map<string, number>()
+  for (const row of (predictions?.data ?? []) as unknown as Array<{ member_id: string }>) {
+    predictionsMade.set(row.member_id, (predictionsMade.get(row.member_id) ?? 0) + 1)
+  }
+
+  const signHits = new Map<string, number>()
+  for (const row of (points?.data ?? []) as unknown as Array<{
+    member_id: string
+    sign_hit: boolean | null
+  }>) {
+    if (row.sign_hit === true) signHits.set(row.member_id, (signHits.get(row.member_id) ?? 0) + 1)
+  }
+
+  const dues = complete
+    ? duesForGameweek(
+        ctx.members.map((member) => ({
+          memberId: member.memberId,
+          points: totalByMember.get(member.memberId) ?? 0,
+          predictionsMade: predictionsMade.get(member.memberId) ?? 0,
+          signHits: signHits.get(member.memberId) ?? 0,
+        })),
+      )
+    : new Map<string, number>()
+
   const ordered = [...ctx.members].sort(
     (a, b) => (totalByMember.get(b.memberId) ?? 0) - (totalByMember.get(a.memberId) ?? 0),
   )
@@ -213,6 +247,9 @@ export async function getGameweekStandings(n: number): Promise<GameweekStandings
       }
     }),
     pendingCount,
+    // `null` = no paga (o la jornada no ha acabado). Nunca 0: un 0 se leeria
+    // como "paga cero euros", que no es lo mismo que "no le toca pagar".
+    euros: dues.get(member.memberId) ?? null,
   }))
 
   const inPlay = matches.some((row) => {
@@ -233,4 +270,46 @@ export async function getGameweekStandings(n: number): Promise<GameweekStandings
     statusLabel: `${prefix} · ${playedMatches.length} de ${matches.length} partidos`,
     rows,
   }
+}
+
+/**
+ * Lo que lleva pagado cada uno en la temporada.
+ *
+ * Se agrega en SQL (`public.season_dues`, migracion 0023) y no aqui: sumarlo en
+ * memoria obligaria a traerse todos los pronosticos de la temporada, y PostgREST
+ * corta a 1000 filas. Con 15 personas y 380 partidos son ~5.700, asi que el
+ * acumulado saldria corto Y EN SILENCIO. Con dinero en medio eso no vale.
+ *
+ * Solo cuenta jornadas ACABADAS. Todo a cero es el estado normal hasta que se
+ * juegue la primera entera, y la pantalla lo dice asi en vez de sonar a error.
+ */
+export async function getSeasonDues(): Promise<SeasonDuesVM> {
+  const ctx = await getDataContext()
+  if (!ctx) return { rows: [], total: 0 }
+
+  const { data, error } = await ctx.supabase.rpc('season_dues')
+  // Un fallo aqui no puede tumbar la clasificacion: se devuelve vacio y la
+  // seccion no se pinta. Los puntos, que es lo importante, siguen saliendo.
+  if (error) return { rows: [], total: 0 }
+
+  const euros = new Map(
+    ((data ?? []) as unknown as Array<{ member_id: string; euros: number }>).map((row) => [
+      row.member_id,
+      row.euros,
+    ]),
+  )
+
+  const rows = ctx.members
+    .map((member) => ({
+      memberId: member.memberId,
+      displayName: member.displayName,
+      avatarColor: member.avatarColor,
+      avatarUrl: member.avatarUrl,
+      euros: euros.get(member.memberId) ?? 0,
+      isMe: member.memberId === ctx.memberId,
+    }))
+    // De mas a menos deuda: la lista existe para ver quien va pagando.
+    .sort((a, b) => b.euros - a.euros || a.displayName.localeCompare(b.displayName, 'es'))
+
+  return { rows, total: rows.reduce((sum, row) => sum + row.euros, 0) }
 }

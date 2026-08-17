@@ -644,6 +644,8 @@ export async function mockGetGameweekStandings(n: number): Promise<GameweekStand
         isMe: person.id === myId,
         breakdown,
         pendingCount,
+        // Sin backend no hay pagos que calcular: la demo no tiene deudas.
+        euros: null,
       }
     })
     .sort((a, b) => b.points - a.points)

@@ -32,7 +32,13 @@ export function GameweekAccordion({ rows }: GameweekAccordionProps) {
             key={row.memberId}
             className={cn(
               'overflow-hidden rounded-[15px] border',
-              row.isMe ? 'border-accent bg-accent-soft' : 'border-line bg-card',
+              // Quien paga se marca en rojo, y gana sobre el resalte de "tú":
+              // que te toque pagar es la informacion importante de esa fila.
+              row.euros !== null
+                ? 'border-bad bg-bad-soft'
+                : row.isMe
+                  ? 'border-accent bg-accent-soft'
+                  : 'border-line bg-card',
             )}
           >
             <button
@@ -57,6 +63,12 @@ export function GameweekAccordion({ rows }: GameweekAccordionProps) {
               {row.isMe && (
                 <span className="flex-none rounded-[7px] bg-accent px-[7px] py-[2px] text-[9.5px] font-extrabold tracking-[.08em] text-accent-ink">
                   TÚ
+                </span>
+              )}
+              {/* La cantidad, no un icono: lo que hace falta saber es cuanto. */}
+              {row.euros !== null && (
+                <span className="flex-none rounded-[8px] bg-bad px-[8px] py-[3px] font-num text-[13px] font-extrabold text-white">
+                  {row.euros} €
                 </span>
               )}
               <span
