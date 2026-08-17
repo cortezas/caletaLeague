@@ -19,6 +19,11 @@ import { isSupabaseConfigured } from '@/lib/supabase/server'
  * que poder emitir el enlace el mismo, sin depender de mi.
  */
 
+/**
+ * OJO: de un fichero 'use server' SOLO pueden salir funciones async. Exportar
+ * aqui el estado inicial como constante rompe la pagina entera al cargarla, con
+ * un error que ni siquiera menciona este fichero. Vive en el componente.
+ */
 export type InviteState = {
   ok: boolean
   error: string | null
@@ -27,7 +32,8 @@ export type InviteState = {
   email: string | null
 }
 
-export const NO_INVITE: InviteState = { ok: false, error: null, link: null, email: null }
+/** Estado vacio para componer las respuestas. NO se exporta: ver la nota de arriba. */
+const NADA: InviteState = { ok: false, error: null, link: null, email: null }
 
 const DENIED = 'No tienes permiso para esto.'
 
@@ -66,16 +72,16 @@ export async function createInviteLinkAction(
   try {
     await requireAdmin()
   } catch {
-    return { ...NO_INVITE, error: DENIED }
+    return { ...NADA, error: DENIED }
   }
 
   const email = String(formData.get('email') ?? '').trim().toLowerCase()
   if (!EMAIL_RE.test(email)) {
-    return { ...NO_INVITE, error: 'Ese correo no tiene buena pinta.' }
+    return { ...NADA, error: 'Ese correo no tiene buena pinta.' }
   }
 
   if (!isSupabaseConfigured) {
-    return { ...NO_INVITE, error: 'No hay proyecto de Supabase configurado.' }
+    return { ...NADA, error: 'No hay proyecto de Supabase configurado.' }
   }
 
   let token: string | undefined
@@ -87,14 +93,14 @@ export async function createInviteLinkAction(
       const message = /rate|limit/i.test(error.message)
         ? 'Has emitido demasiados enlaces en poco rato. Espera un poco.'
         : 'No hemos podido generar el enlace.'
-      return { ...NO_INVITE, error: message }
+      return { ...NADA, error: message }
     }
     token = data.properties?.hashed_token
   } catch {
-    return { ...NO_INVITE, error: 'No hemos podido generar el enlace.' }
+    return { ...NADA, error: 'No hemos podido generar el enlace.' }
   }
 
-  if (!token) return { ...NO_INVITE, error: 'No hemos podido generar el enlace.' }
+  if (!token) return { ...NADA, error: 'No hemos podido generar el enlace.' }
 
   const origin = (process.env.NEXT_PUBLIC_SITE_URL ?? 'https://caleta-league.vercel.app').replace(/\/+$/, '')
   const link = `${origin}/auth/confirm?token_hash=${token}&type=email&next=/jornada`

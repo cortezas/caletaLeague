@@ -7,7 +7,10 @@ import { Button, Chip, TextInput, useToast } from '@/components/ui'
 import { cn } from '@/lib/cn'
 import type { AccessRowVM } from '@/lib/data/access'
 
-import { createInviteLinkAction, NO_INVITE } from './access-actions'
+import { createInviteLinkAction, type InviteState } from './access-actions'
+
+/** Estado inicial. Aqui y no en las acciones: de un 'use server' solo salen funciones. */
+const NO_INVITE: InviteState = { ok: false, error: null, link: null, email: null }
 
 export interface AdminAccessFormProps {
   rows: AccessRowVM[]
