@@ -27,8 +27,10 @@ import {
   getDataContext,
   getLeagueGameweeks,
   isoUtc,
+  liveScoreOf,
   resolveActiveGameweek,
   resultOf,
+  resultOrLiveOf,
   teamVM,
 } from './league'
 import type { DataContext, GameweekRow, MatchRow } from './league'
@@ -145,7 +147,13 @@ function matchRowVM(
 ): MatchRowVM {
   const status = effectiveStatus(row, now)
   const result = resultOf(row, now)
-  const scored = result !== null && points !== undefined
+  const liveScore = liveScoreOf(row, now)
+
+  // Los puntos tambien cuentan MIENTRAS se juega. `prediction_points` ya los
+  // calcula en cuanto hay marcador en la fila, asi que el dato existia y solo
+  // faltaba dejarlo pasar: antes se exigia el partido cerrado y por eso la
+  // jornada salia a cero hasta el pitido final.
+  const scored = points !== undefined && (result !== null || liveScore !== null)
 
   return {
     id: row.id,
@@ -157,6 +165,7 @@ function matchRowVM(
     status,
     myPrediction: prediction,
     result,
+    liveScore,
     myPoints: scored ? points.points : null,
     exactHit: scored ? points.exact_hit === true : false,
     // Vacios cuando el equipo aun no tiene racha: la fila entonces no pinta nada.
@@ -374,7 +383,19 @@ export async function getMatchEditor(matchId: string): Promise<PredictEditorVM |
   }
 }
 
-/** `null` si el partido no existe, no es visible, o aun no esta jugado (no se revela). */
+/**
+ * El pique: que puso cada uno. `null` si el partido no existe, no es visible o
+ * NO HA EMPEZADO todavia.
+ *
+ * Se abre en el pitido inicial y no al final. Ese es justo el momento en que la
+ * RLS destapa los pronosticos ajenos, asi que la regla de la peña ("nadie ve el
+ * tuyo antes de que empiece") se sigue cumpliendo sola: aqui no hay ninguna
+ * comprobacion que se pueda olvidar.
+ *
+ * Mientras se juega, el marcador y los goleadores son PROVISIONALES y pueden ir
+ * por detras de la realidad -- Highlightly no publica al ritmo de football-data.
+ * `live` esta para que la pantalla lo diga en vez de aparentar que es definitivo.
+ */
 export async function getMatchPique(matchId: string): Promise<PiqueVM | null> {
   const ctx = await getDataContext()
   if (!ctx) return mockGetMatchPique(matchId)
@@ -382,8 +403,14 @@ export async function getMatchPique(matchId: string): Promise<PiqueVM | null> {
   const row = await fetchMatchRow(ctx, matchId)
   if (!row) return null
 
-  const result = resultOf(row, ctx.now)
-  if (!result) return null
+  const status = effectiveStatus(row, ctx.now)
+  if (status === 'open') return null
+
+  const live = status !== 'played'
+  // Puede ser `null` con el partido ya empezado: la ingesta aun no ha traido el
+  // marcador. No es un fallo, y los pronosticos se enseñan igual -- que es lo
+  // que se venia a ver.
+  const result = resultOrLiveOf(row, ctx.now)
 
   const [predictions, points, forms] = await Promise.all([
     fetchPredictions(ctx, [row.id]),
@@ -396,11 +423,12 @@ export async function getMatchPique(matchId: string): Promise<PiqueVM | null> {
 
   // Goleadores reales distintos, normalizados: "Vinicius" y "Vinícius" escritos
   // por dos personas distintas son el mismo gol.
-  const realScorers = new Set(result.scorers.map(normalizePlayer).filter((n) => n !== ''))
+  const realScorers = new Set((result?.scorers ?? []).map(normalizePlayer).filter((n: string) => n !== ''))
   // Las asistencias reales van por su cuenta: un partido puede tener goleadores
   // metidos y las asistencias todavia en blanco, y al reves.
-  const realAssists = new Set(result.assists.map(normalizePlayer).filter((n) => n !== ''))
-  const goalless = result.home + result.away === 0
+  const realAssists = new Set((result?.assists ?? []).map(normalizePlayer).filter((n: string) => n !== ''))
+  // Sin marcador todavia no hay "partido sin goles": son cosas distintas.
+  const goalless = result !== null && result.home + result.away === 0
   const hasScorerData = realScorers.size > 0 || goalless
 
   const entries = predictions
@@ -420,7 +448,7 @@ export async function getMatchPique(matchId: string): Promise<PiqueVM | null> {
         chips.push({
           kind: 'scorer',
           label: scorer,
-          hit: result.scorers.some((real) => samePlayer(real, scorer)),
+          hit: (result?.scorers ?? []).some((real: string) => samePlayer(real, scorer)),
         })
       }
       // Detras de los goles y con `kind` propio: el mismo nombre puede estar en
@@ -429,7 +457,7 @@ export async function getMatchPique(matchId: string): Promise<PiqueVM | null> {
         chips.push({
           kind: 'assist',
           label: assist,
-          hit: result.assists.some((real) => samePlayer(real, assist)),
+          hit: (result?.assists ?? []).some((real: string) => samePlayer(real, assist)),
         })
       }
 
@@ -458,6 +486,19 @@ export async function getMatchPique(matchId: string): Promise<PiqueVM | null> {
     .sort((a, b) => b.row.points - a.row.points)
 
   const rows = entries.map((entry) => entry.row)
+
+  const mine = predictions.find((p) => p.member_id === ctx.memberId) ?? null
+  const matchVM = () =>
+    matchRowVM(row, mine ? predictionOf(mine) : null, pointsByMember.get(ctx.memberId), ctx.now, forms)
+
+  // PARTIDO EMPEZADO Y SIN MARCADOR TODAVIA.
+  // Pasa entre el pitido inicial y la primera pasada de la ingesta que lo trae.
+  // Se devuelve el pique SIN destacados: hablan de aciertos, y sin resultado no
+  // hay acierto que contar. Lo que si se enseña -- que puso cada uno -- es justo
+  // lo que se venia a ver.
+  if (result === null) {
+    return { match: matchVM(), highlights: [], rows, memberCount: rows.length, live }
+  }
 
   // Destacados contados sobre los pronosticos reales, nunca cableados.
   const exactCount = rows.filter((r) => r.exact).length
@@ -541,21 +582,14 @@ export async function getMatchPique(matchId: string): Promise<PiqueVM | null> {
     })
   }
 
-  const mine = predictions.find((p) => p.member_id === ctx.memberId) ?? null
-
   return {
-    match: matchRowVM(
-      row,
-      mine ? predictionOf(mine) : null,
-      pointsByMember.get(ctx.memberId),
-      ctx.now,
-      forms,
-    ),
+    match: matchVM(),
     highlights,
     rows,
     // Cuantos PUSIERON algo, no cuantos son en la peña. La fila del VM exige un
     // marcador (`home`/`away` son numeros obligatorios) y quien no pronostico no
     // tiene ninguno: inventarle un 0-0 seria meterle en la boca algo que no dijo.
     memberCount: rows.length,
+    live,
   }
 }

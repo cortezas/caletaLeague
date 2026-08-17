@@ -185,8 +185,22 @@ function Tail({ match, variant }: { match: MatchRowVM; variant: RowVariant }) {
 
   if (variant === 'live') {
     return (
-      <span className="flex items-center gap-[8px]">
+      <span className="flex items-center gap-[9px]">
         <MyScore match={match} />
+        {/* El marcador del momento, que es lo primero que se busca sin entrar.
+            Si la ingesta aun no lo ha traido queda el punto latiendo y ya esta:
+            un 0-0 inventado seria peor que no decir nada. */}
+        {match.liveScore && (
+          <span className="flex items-center gap-[5px] rounded-[12px] bg-bad-soft px-[11px] py-[6px]">
+            <span className="min-w-[17px] text-center font-num text-[30px] font-bold leading-none tabular-nums text-bad">
+              {match.liveScore.home}
+            </span>
+            <span className="font-num text-[20px] font-bold leading-none text-txt3">–</span>
+            <span className="min-w-[17px] text-center font-num text-[30px] font-bold leading-none tabular-nums text-bad">
+              {match.liveScore.away}
+            </span>
+          </span>
+        )}
         <span className="flex h-[34px] w-[34px] flex-none items-center justify-center rounded-[12px] bg-bad-soft">
           <PulseDot tone="bad" size={8} speed={1.4} />
         </span>
@@ -222,15 +236,23 @@ function Tail({ match, variant }: { match: MatchRowVM; variant: RowVariant }) {
  */
 export function MatchRow({ match }: MatchRowProps) {
   const variant = variantOf(match)
-  const href = variant === 'played' ? `/partido/${match.id}` : `/jornada/${match.id}`
+
+  // Pasado el pitido inicial se va al PIQUE, no al editor. Antes solo se entraba
+  // con el partido terminado, y justo el rato en que apetece mirar que puso cada
+  // uno -- mientras se juega -- llevaba a un editor que ya no deja tocar nada.
+  // La regla del secreto no se relaja por esto: la RLS destapa los pronosticos
+  // ajenos exactamente en el pitido inicial, ni un segundo antes.
+  const href = variant === 'todo' || variant === 'predicted'
+    ? `/jornada/${match.id}`
+    : `/partido/${match.id}`
 
   const rightText =
     variant === 'predicted'
       ? 'Editable'
       : variant === 'locked'
-        ? 'Sellado'
+        ? 'Ver qué puso cada uno'
         : variant === 'live'
-          ? 'Se revela al final'
+          ? `${match.myPoints ?? 0} pts en juego`
           : variant === 'played'
             ? `+${match.myPoints ?? 0} pts`
             : null
@@ -238,9 +260,11 @@ export function MatchRow({ match }: MatchRowProps) {
   const rightTone =
     variant === 'predicted'
       ? 'text-accent2'
-      : variant === 'played' && (match.myPoints ?? 0) > 0
+      : variant === 'live' && (match.myPoints ?? 0) > 0
         ? 'text-ok'
-        : 'text-txt3'
+        : variant === 'played' && (match.myPoints ?? 0) > 0
+          ? 'text-ok'
+          : 'text-txt3'
 
   return (
     <Link

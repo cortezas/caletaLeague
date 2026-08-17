@@ -227,6 +227,9 @@ function matchRowVM(match: Match, myPrediction: Prediction | null, scoring: Scor
 
   return {
     id: match.id,
+    // El mock deriva el estado del reloj y nunca produce 'locked' ni marcadores
+    // a medias: en seco no hay partido en juego que enseñar.
+    liveScore: null,
     home: teamVM(match.home),
     away: teamVM(match.away),
     kickoffAt: match.kickoffAt,
@@ -575,6 +578,8 @@ export async function mockGetMatchPique(matchId: string): Promise<PiqueVM | null
 
   return {
     match: matchRowVM(match, myPredictionOf(view, myId, match), scoring),
+    // El mock solo abre el pique de partidos ya jugados: nunca es provisional.
+    live: false,
     highlights,
     rows,
     memberCount: PEOPLE.length,

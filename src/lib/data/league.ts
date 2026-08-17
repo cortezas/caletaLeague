@@ -509,6 +509,46 @@ export function resultOf(row: MatchRow, now: number): MatchResult | null {
 }
 
 /**
+ * Marcador EN CURSO: el partido ya empezo y todavia no esta cerrado.
+ *
+ * Sale de las mismas dos columnas que el resultado final. La ingesta las escribe
+ * en cada pasada tambien mientras se juega, porque football-data manda el
+ * marcador del momento en `score.fullTime` cuando el estado es IN_PLAY. O sea
+ * que el dato ya estaba en la base y no se pintaba en ningun sitio.
+ *
+ * `null` si el partido no ha empezado o si aun no hay marcador que enseñar.
+ */
+export function liveScoreOf(row: MatchRow, now: number): { home: number; away: number } | null {
+  const status = effectiveStatus(row, now)
+  if (status === 'open' || status === 'played') return null
+  if (row.real_home === null || row.real_away === null) return null
+  return { home: row.real_home, away: row.real_away }
+}
+
+/**
+ * Como `resultOf`, pero tambien durante el partido.
+ *
+ * `resultOf` solo contesta con el partido CERRADO, y eso es lo correcto para la
+ * clasificacion: un marcador a medias no es un resultado. Pero el pique si tiene
+ * que enseñar lo que va habiendo, que es justo el rato en que la peña lo mira.
+ *
+ * Lo que devuelve es provisional y quien lo pinta tiene que decirlo. Los
+ * goleadores pueden ir por detras del marcador: Highlightly no publica al mismo
+ * ritmo que football-data.
+ */
+export function resultOrLiveOf(row: MatchRow, now: number): MatchResult | null {
+  if (effectiveStatus(row, now) === 'open') return null
+  if (row.real_home === null || row.real_away === null) return null
+  return {
+    home: row.real_home,
+    away: row.real_away,
+    mvp: row.real_mvp ?? '',
+    scorers: row.real_scorers ?? [],
+    assists: row.real_assists ?? [],
+  }
+}
+
+/**
  * Ficha visual del equipo. Un codigo que no este en `TEAMS` (un ascendido que
  * aun no se ha añadido a laliga.ts, por ejemplo) NO revienta la pantalla: se
  * pinta con sus siglas y un gris neutro, y se ve a la legua que falta el dato.

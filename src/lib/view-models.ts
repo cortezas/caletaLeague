@@ -23,7 +23,15 @@ export type MatchRowVM = {
   status: MatchStatus        // 'open' | 'locked' | 'live' | 'played'
   myPrediction: Prediction | null
   result: MatchResult | null
-  myPoints: number | null    // null si el partido no esta jugado
+  /**
+   * Marcador del momento mientras se juega. `null` antes del pitido inicial y
+   * tambien con el partido cerrado, que entonces manda `result`.
+   *
+   * Va aparte de `result` a proposito: un marcador a medias NO es un resultado,
+   * y confundirlos haria que la clasificacion contase partidos sin terminar.
+   */
+  liveScore: { home: number; away: number } | null
+  myPoints: number | null    // null hasta que hay marcador, tambien en vivo
   exactHit: boolean          // marcador propio identico al real
   /**
    * Racha del equipo en LaLiga, de `competition_standings` (migracion 0015).
@@ -104,7 +112,22 @@ export type PredictEditorVM = {
 export type PiqueChipKind = 'mvp' | 'noGoals' | 'scorer' | 'assist'
 
 export type PiqueVM = {
-  match: MatchRowVM                       // con result garantizado no nulo
+  /**
+   * El partido. `match.result` puede venir a null entre el pitido inicial y la
+   * primera pasada de la ingesta que trae el marcador: el pique se abre igual,
+   * porque lo que se viene a ver es qué puso cada uno.
+   */
+  match: MatchRowVM
+  /**
+   * true mientras el partido no ha terminado.
+   *
+   * El marcador, los goleadores y los puntos son PROVISIONALES, y la pantalla
+   * tiene que decirlo: los goleadores llegan por Highlightly, que no publica al
+   * ritmo de football-data, asi que se puede ver un 2-1 con un solo goleador
+   * listado. Sin este aviso parece que la app se ha equivocado.
+   */
+  live: boolean
+  /** Vacios mientras no haya marcador: hablan de aciertos, y sin resultado no hay ninguno. */
   highlights: Array<{ value: string; text: string; tone: 'ok' | 'accent' | 'neutral' }>
   rows: Array<{
     memberId: string; displayName: string; avatarColor: string; avatarUrl: string | null; isMe: boolean
