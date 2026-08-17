@@ -4,12 +4,14 @@ import Link from 'next/link'
 import { notFound, unstable_rethrow } from 'next/navigation'
 
 import { ScreenHeader } from '@/components/ui'
+import { AdminAccessForm } from '@/features/admin/admin-access-form'
 import { AdminKickoffForm } from '@/features/admin/admin-kickoff-form'
 import { AdminResultForm } from '@/features/admin/admin-result-form'
 import { AdminScoringForm } from '@/features/admin/admin-scoring-form'
 import { AdminSquadForm } from '@/features/admin/admin-squad-form'
 import { requireAdmin } from '@/lib/auth'
 import { cn } from '@/lib/cn'
+import { getAccessRows } from '@/lib/data/access'
 import { getAdminMatches, getAdminSquads, getLeagueSettings } from '@/lib/data'
 import { TEAM_CODES, TEAMS } from '@/lib/laliga'
 import type { TeamVM } from '@/lib/view-models'
@@ -25,6 +27,7 @@ export const metadata: Metadata = { title: 'Administrador · La Caleta League' }
 const TABS = [
   { key: 'resultados', label: 'Resultados' },
   { key: 'horarios', label: 'Horarios' },
+  { key: 'accesos', label: 'Accesos' },
   { key: 'puntuacion', label: 'Puntuación' },
   { key: 'plantillas', label: 'Plantillas' },
 ] as const
@@ -99,11 +102,17 @@ export default async function AdminPage({
         ? 'plantillas'
         : tab === 'horarios'
           ? 'horarios'
-          : 'resultados'
-  const [settings, gameweek, squads] = await Promise.all([
+          : tab === 'accesos'
+            ? 'accesos'
+            : 'resultados'
+  // `getAccessRows` solo en su pestaña: lista los correos de toda la peña con la
+  // service role key, y eso no tiene por que ejecutarse cada vez que se abre el
+  // panel a rellenar un marcador.
+  const [settings, gameweek, squads, accessRows] = await Promise.all([
     getLeagueSettings(),
     getAdminMatches(jornada),
     getAdminSquads(),
+    active === 'accesos' ? getAccessRows() : Promise.resolve([]),
   ])
   if (!gameweek) notFound()
 
@@ -235,6 +244,7 @@ export default async function AdminPage({
       {active === 'puntuacion' && (
         <AdminScoringForm scoring={settings.scoring} memberCount={settings.memberCount} />
       )}
+      {active === 'accesos' && <AdminAccessForm rows={accessRows} />}
       {active === 'plantillas' && <AdminSquadForm teams={TEAM_LIST} squads={squads} />}
     </>
   )
