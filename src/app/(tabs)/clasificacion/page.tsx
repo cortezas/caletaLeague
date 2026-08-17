@@ -4,6 +4,7 @@ import Link from 'next/link'
 
 import { EmptyState, ScreenHeader } from '@/components/ui'
 import { CompetitionTable } from '@/features/standings/competition-table'
+import { TopScorers } from '@/features/standings/top-scorers'
 import { HeadToHead } from '@/features/standings/head-to-head'
 import { Podium } from '@/features/standings/podium'
 import { StandingsRow } from '@/features/standings/standings-row'
@@ -13,6 +14,7 @@ import {
   getCompetitionStandings,
   getHeadToHead,
   getSeasonStandings,
+  getTopScorers,
 } from '@/lib/data'
 
 export const metadata: Metadata = { title: 'Clasificación · La Caleta League' }
@@ -58,10 +60,11 @@ export default async function ClasificacionPage({
 
   const vista = parseVista((await searchParams).vista)
 
-  const [gameweek, standings, competition, h2h] = await Promise.all([
+  const [gameweek, standings, competition, scorers, h2h] = await Promise.all([
     getActiveGameweek(),
     vista === 'general' ? getSeasonStandings() : null,
     vista === 'laliga' ? getCompetitionStandings() : null,
+    vista === 'laliga' ? getTopScorers(20) : null,
     vista === 'cara-a-cara' ? getHeadToHead() : null,
   ])
 
@@ -108,7 +111,12 @@ export default async function ClasificacionPage({
         </nav>
       </ScreenHeader>
 
-      {competition && <CompetitionTable standings={competition} />}
+      {competition && (
+        <div className="flex flex-col gap-[12px] px-[14px] pb-[26px]">
+          <CompetitionTable standings={competition} />
+          {scorers && <TopScorers data={scorers} />}
+        </div>
+      )}
       {h2h && <HeadToHead h2h={h2h} />}
 
       {standings &&
