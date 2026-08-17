@@ -33,18 +33,18 @@ export function TeamBadge({ team, size }: TeamBadgeProps) {
     return (
       <span
         aria-hidden="true"
-        className="inline-flex flex-none items-center justify-center rounded-full bg-card2"
+        className="inline-flex flex-none items-center justify-center"
         style={{ width: size, height: size }}
       >
+        {/* NI `rounded-full` NI fondo. Los dos juntos le cortaban las esquinas a
+            todos los escudos: los 20 ficheros vienen recortados al ras (margen
+            transparente de 0 px, medido), asi que la mascara circular se comia
+            las puntas. Se notaba en los de forma de escudo -- Barça, Atlético,
+            Athletic -- y no en los redondos, de ahi que pareciera cosa de
+            "algunos". Un escudo no necesita recorte: se pinta entero. */}
         {/* eslint-disable-next-line @next/next/no-img-element -- fichero local
             de tamano fijo y conocido; next/image no aporta nada y anade config */}
-        <img
-          src={crest}
-          alt=""
-          width={size}
-          height={size}
-          className="size-full rounded-full object-contain"
-        />
+        <img src={crest} alt="" width={size} height={size} className="size-full object-contain" />
       </span>
     )
   }
