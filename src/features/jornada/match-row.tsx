@@ -1,7 +1,7 @@
 import { ChevronRight, Lock } from 'lucide-react'
 import Link from 'next/link'
 
-import { PulseDot, TeamBadge } from '@/components/ui'
+import { NavSpinner, PulseDot, TeamBadge } from '@/components/ui'
 import { cn } from '@/lib/cn'
 import { scoreLabel } from '@/lib/format'
 import type { MatchRowVM, TeamVM } from '@/lib/view-models'
@@ -311,6 +311,10 @@ export function MatchRow({ match }: MatchRowProps) {
           <TeamLine team={match.away} dimmed={variant === 'locked'} form={match.awayForm} />
         </span>
         <span className="flex flex-none items-center gap-[9px]">
+          {/* Al pulsar, la pantalla siguiente la monta el servidor y el movil se
+              queda quieto. Sin esto parece que el toque no ha entrado y se vuelve
+              a pulsar. Solo aparece si la espera pasa de 150 ms. */}
+          <NavSpinner size={16} />
           <Tail match={match} variant={variant} />
         </span>
       </span>

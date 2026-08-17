@@ -1,9 +1,10 @@
 'use client'
 
 import { CalendarDays, Settings, Trophy, User } from 'lucide-react'
-import Link from 'next/link'
+import Link, { useLinkStatus } from 'next/link'
 import { usePathname } from 'next/navigation'
 
+import { NavSpinner } from '@/components/ui'
 import { cn } from '@/lib/cn'
 
 const TABS = [
@@ -12,6 +13,25 @@ const TABS = [
   { href: '/perfil', label: 'Perfil', Icon: User, stroke: 1.9 },
   { href: '/ajustes', label: 'Ajustes', Icon: Settings, stroke: 1.6 },
 ] as const
+
+/**
+ * El icono de la pestaña, o un spinner mientras se navega hacia ella.
+ *
+ * Va dentro del `<Link>` porque `useLinkStatus` solo funciona ahi. Sustituir el
+ * icono en vez de añadir el spinner al lado mantiene la altura de la barra: si
+ * se sumara, las cuatro pestañas darian un salto al pulsar una.
+ */
+function NavSpinnerOrIcon({
+  Icon,
+  stroke,
+}: {
+  Icon: (typeof TABS)[number]['Icon']
+  stroke: number
+}) {
+  const { pending } = useLinkStatus()
+  if (pending) return <NavSpinner size={24} />
+  return <Icon size={24} strokeWidth={stroke} aria-hidden />
+}
 
 /**
  * Client Component a proposito: los layouts no se re-renderizan al navegar, asi
@@ -39,7 +59,11 @@ export function TabBar() {
                   active ? 'text-accent' : 'text-txt3',
                 )}
               >
-                <Icon size={24} strokeWidth={stroke} aria-hidden />
+                {/* Sustituye al icono mientras carga la pestaña: mismo tamaño,
+                    asi la barra no da un salto. */}
+                <span className="flex h-[24px] items-center justify-center">
+                  <NavSpinnerOrIcon Icon={Icon} stroke={stroke} />
+                </span>
                 <span className="text-[10.5px] font-bold leading-none">{label}</span>
               </Link>
             </li>

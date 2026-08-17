@@ -8,6 +8,7 @@ export { Card } from './card'
 export type { CardProps, CardRadius } from './card'
 
 export { Button } from './button'
+export { NavSpinner } from './nav-spinner'
 export type { ButtonProps, ButtonSize, ButtonVariant } from './button'
 
 export { Chip } from './chip'

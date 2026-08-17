@@ -125,6 +125,13 @@
   50% { opacity: 0.4; }
 }
 
+/* Aparicion retrasada del indicador de navegacion (`NavSpinner`).
+   Arranca invisible y solo se muestra si la navegacion pasa de 150 ms: asi las
+   pantallas que van rapidas no dan un parpadeo, que molesta mas que la espera. */
+@keyframes navspin {
+  to { opacity: 1; }
+}
+
 /* --------------------------------------------------------------------------
    Base
    -------------------------------------------------------------------------- */
