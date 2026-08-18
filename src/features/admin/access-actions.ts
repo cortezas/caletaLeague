@@ -1,9 +1,10 @@
 'use server'
 
 import { createClient as createAdminClient } from '@supabase/supabase-js'
+import { revalidatePath } from 'next/cache'
 
 import { requireAdmin } from '@/lib/auth'
-import { isSupabaseConfigured } from '@/lib/supabase/server'
+import { createClient, isSupabaseConfigured } from '@/lib/supabase/server'
 
 /**
  * Enlaces de acceso emitidos por el organizador.
@@ -106,4 +107,81 @@ export async function createInviteLinkAction(
   const link = `${origin}/auth/confirm?token_hash=${token}&type=email&next=/jornada`
 
   return { ok: true, error: null, link, email }
+}
+
+/* ------------------------------------------------------------------ *
+ * Echar a alguien de la peña
+ * ------------------------------------------------------------------ */
+
+export type RemoveState = { ok: boolean; error: string | null; removed: string | null }
+
+/**
+ * Saca a un miembro de la peña.
+ *
+ * LO QUE SE LLEVA POR DELANTE, que no es poco:
+ *   - sus pronosticos (`predictions` cae en CASCADE), o sea su historial entero;
+ *   - sus avisos push (`push_subscriptions`, `push_reminders_sent`).
+ *
+ * Y REESCRIBE EL PASADO. Quien quedo ultimo en cada jornada se calcula sobre los
+ * datos de AHORA (`season_dues`, migracion 0023), asi que al quitar a alguien los
+ * pagos de jornadas ya cerradas pueden cambiar de dueño. Si ya se cobro, la
+ * pantalla dejara de cuadrar con lo que hay en el bote de verdad. Por eso la
+ * pantalla lo avisa antes y pide confirmar, en vez de borrar de una pulsacion.
+ *
+ * NO se borra su CUENTA, solo su ficha en la peña: puede volver a entrar con el
+ * codigo de invitacion. Eso es a proposito -- echar a alguien por error no tiene
+ * que costar una cuenta nueva.
+ *
+ * EL ORGANIZADOR NO SE PUEDE BORRAR A SI MISMO. Se quedaria una peña sin nadie
+ * que pueda meter resultados ni emitir accesos, y sin forma de arreglarlo desde
+ * la aplicacion.
+ */
+export async function removeMemberAction(
+  _prev: RemoveState,
+  formData: FormData,
+): Promise<RemoveState> {
+  let me
+  try {
+    me = await requireAdmin()
+  } catch {
+    return { ok: false, error: DENIED, removed: null }
+  }
+
+  const memberId = String(formData.get('memberId') ?? '')
+  const name = String(formData.get('name') ?? '').trim()
+  if (memberId === '') return { ok: false, error: 'Falta a quién quitar.', removed: null }
+
+  if (memberId === me.memberId) {
+    return {
+      ok: false,
+      error: 'No puedes quitarte a ti: la peña se quedaría sin organizador.',
+      removed: null,
+    }
+  }
+
+  if (!isSupabaseConfigured) {
+    return { ok: false, error: 'No hay proyecto de Supabase configurado.', removed: null }
+  }
+
+  const supabase = await createClient()
+  // Con la sesion del organizador, NO con service role: asi la politica
+  // `members_delete_self_or_admin` sigue siendo la frontera de verdad y esto no
+  // puede tocar a nadie de otra peña ni por error.
+  const { data, error } = await supabase
+    .from('members')
+    .delete()
+    .eq('id', memberId)
+    .eq('league_id', me.leagueId)
+    .select('id')
+
+  if (error) return { ok: false, error: 'No hemos podido quitarlo.', removed: null }
+  // 0 filas = RLS lo tapo, o ya no estaba. Para quien mira es lo mismo.
+  if (!data || data.length === 0) {
+    return { ok: false, error: 'Ese miembro ya no está en la peña.', removed: null }
+  }
+
+  revalidatePath('/ajustes/admin')
+  revalidatePath('/clasificacion')
+  revalidatePath('/jornada')
+  return { ok: true, error: null, removed: name || 'Miembro' }
 }

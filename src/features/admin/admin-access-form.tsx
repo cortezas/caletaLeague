@@ -1,16 +1,24 @@
 'use client'
 
-import { Check, Copy, Link2 } from 'lucide-react'
+import { AlertTriangle, Check, Copy, Link2, UserMinus } from 'lucide-react'
 import { useActionState, useEffect, useState } from 'react'
 
 import { Button, Chip, TextInput, useToast } from '@/components/ui'
 import { cn } from '@/lib/cn'
 import type { AccessRowVM } from '@/lib/data/access'
 
-import { createInviteLinkAction, type InviteState } from './access-actions'
+import {
+  createInviteLinkAction,
+  removeMemberAction,
+  type InviteState,
+  type RemoveState,
+} from './access-actions'
 
 /** Estado inicial. Aqui y no en las acciones: de un 'use server' solo salen funciones. */
 const NO_INVITE: InviteState = { ok: false, error: null, link: null, email: null }
+
+/** Estado inicial del borrado. Aqui por lo mismo: de un 'use server' solo salen funciones. */
+const NO_REMOVE: RemoveState = { ok: false, error: null, removed: null }
 
 export interface AdminAccessFormProps {
   rows: AccessRowVM[]
@@ -72,6 +80,25 @@ export function AdminAccessForm({ rows }: AdminAccessFormProps) {
       showToast('No hemos podido copiar. Selecciónalo a mano.', 'bad')
     }
   }
+
+  const [removeState, removeAction, removing] = useActionState(removeMemberAction, NO_REMOVE)
+  /**
+   * A quien se esta a punto de quitar. Dos pasos y no uno: esto borra el
+   * historial entero de una persona y no se puede deshacer, asi que una sola
+   * pulsacion es poco.
+   */
+  const [porQuitar, setPorQuitar] = useState<AccessRowVM | null>(null)
+
+  const [seenRemove, setSeenRemove] = useState(removeState)
+  if (seenRemove !== removeState) {
+    setSeenRemove(removeState)
+    if (removeState.ok) setPorQuitar(null)
+  }
+
+  useEffect(() => {
+    if (removeState.ok && removeState.removed) showToast(`${removeState.removed} fuera de la peña.`)
+    else if (removeState.error) showToast(removeState.error, 'bad')
+  }, [removeState, showToast])
 
   const pendientes = rows.filter((row) => row.lastSignInAt === null || row.displayName === null)
 
@@ -165,10 +192,73 @@ export function AdminAccessForm({ rows }: AdminAccessFormProps) {
               >
                 {whenLabel(row.lastSignInAt)}
               </span>
+
+              {/* Solo a quien tiene ficha y no es el organizador. Sin ficha no hay
+                  nada que quitar, y quitarte a ti dejaria la peña sin nadie al
+                  mando y sin forma de arreglarlo desde la app. */}
+              {row.memberId && !row.isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => setPorQuitar(row)}
+                  aria-label={`Quitar a ${row.displayName ?? row.email} de la peña`}
+                  className="flex size-[34px] flex-none items-center justify-center rounded-[10px] border border-line text-txt3 transition-transform duration-100 active:scale-[.94]"
+                >
+                  <UserMinus size={15} strokeWidth={2.3} aria-hidden />
+                </button>
+              )}
             </li>
           ))}
         </ul>
       </div>
+
+      {porQuitar && (
+        <div className="rounded-[17px] border border-bad bg-bad-soft px-[14px] py-[13px]">
+          <div className="mb-[8px] flex items-center gap-[8px]">
+            <AlertTriangle size={16} strokeWidth={2.3} aria-hidden className="flex-none text-bad" />
+            <span className="text-[13px] font-extrabold text-txt">
+              ¿Quitar a {porQuitar.displayName ?? porQuitar.email}?
+            </span>
+          </div>
+
+          {/* Se dice lo que se pierde ANTES de confirmar: "quitar a Fulano" y
+              "borrar los diez pronosticos de Fulano" son la misma accion y no lo
+              parecen. */}
+          <ul className="mb-[11px] flex flex-col gap-[4px] text-[12.5px] font-semibold leading-[1.45] text-txt2">
+            <li>
+              Se borran sus <b className="font-extrabold text-txt">{porQuitar.predictions}</b>{' '}
+              pronósticos y no se pueden recuperar.
+            </li>
+            <li>
+              Cambia el pasado: quién quedó último en cada jornada se recalcula, así que los euros de
+              jornadas ya cerradas pueden moverse.
+            </li>
+            <li>Su cuenta no se borra: puede volver a entrar con el código de la peña.</li>
+          </ul>
+
+          <div className="flex gap-[8px]">
+            <form action={removeAction} className="flex-1">
+              <input type="hidden" name="memberId" value={porQuitar.memberId ?? ''} readOnly />
+              <input
+                type="hidden"
+                name="name"
+                value={porQuitar.displayName ?? porQuitar.email}
+                readOnly
+              />
+              <Button type="submit" variant="danger" size="sm" fullWidth loading={removing}>
+                Sí, quitarlo
+              </Button>
+            </form>
+            <Button
+              variant="secondary"
+              size="sm"
+              className="flex-1"
+              onClick={() => setPorQuitar(null)}
+            >
+              Cancelar
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
