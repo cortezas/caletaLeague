@@ -47,12 +47,30 @@ const DIACRITICS = /[\u0300-\u036f]/g
  * el mismo jugador. Es justo lo que se busca aquí.
  */
 export function normalizePlayer(name: string): string {
-  return name
-    .normalize('NFD')
-    .replace(DIACRITICS, '')
-    .toLowerCase()
-    .replace(/\s+/g, ' ')
-    .trim()
+  return (
+    name
+      .normalize('NFD')
+      .replace(DIACRITICS, '')
+      .toLowerCase()
+      // La PUNTUACION no cuenta: pasa a espacio y luego se colapsa.
+      //
+      // Sin esto, "Lee Kang In" y "Lee Kang-In" eran dos futbolistas distintos.
+      // Paso de verdad: el 19/08/2026 Lee Kang-In marco en el ATM-MAL, la API lo
+      // escribe con guion y nuestra plantilla lo tenia con espacio. Un pronostico
+      // que lo eligiera como goleador se quedaba sin los 2 puntos y no habia
+      // forma de entender por que. En los resultados de esta temporada ya hay
+      // "Pierre-Emerick Aubameyang", "R. Fernandez Jaen" y "M. Rodriguez": el
+      // mismo problema esperando.
+      //
+      // Juntar de mas no es el riesgo: para que dos futbolistas DISTINTOS
+      // colisionen tendrian que llamarse igual salvo la puntuacion, y entonces
+      // ya colisionaban por los acentos.
+      //
+      // ESPEJO de `public.norm_player` (migracion 0024). Si se toca una, se toca
+      // la otra.
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim()
+  )
 }
 
 /**
