@@ -40,6 +40,9 @@ export type DraftAction =
   | { type: 'toggleAssist'; player: string }
   | { type: 'removeAssist'; player: string }
   | { type: 'toggleNoGoals' }
+  // Las dos listas de golpe, ya sorteadas por `randomPicks`. La tirada se hace
+  // fuera: un reducer que llama a `Math.random()` no es puro y no se puede probar.
+  | { type: 'randomFill'; scorers: string[]; assists: string[] }
 
 /** Clamp 0..9 con truncado: el valor puede llegar de un input o de un marcador rapido. */
 function clampGoals(value: number): number {
@@ -128,6 +131,20 @@ export function draftReducer(state: DraftState, action: DraftAction): DraftState
 
     case 'removeAssist':
       return { ...state, assists: removeOne(state.assists, action.player) }
+
+    case 'randomFill': {
+      // Se recorta otra vez al tope aunque `randomPicks` ya lo respete: es lo
+      // unico que impide que un fallo de ahi fuera cuele una lista que el
+      // servidor y la base (migracion 0021) van a rechazar.
+      const cabe = state.home + state.away
+      return {
+        ...state,
+        scorers: action.scorers.slice(0, cabe),
+        assists: action.assists.slice(0, cabe),
+        // Poner goleadores apaga "sin goles", igual que anadirlos a mano.
+        noGoals: false,
+      }
+    }
 
     case 'toggleNoGoals': {
       const noGoals = !state.noGoals

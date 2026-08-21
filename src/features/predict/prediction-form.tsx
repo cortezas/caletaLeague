@@ -1,6 +1,6 @@
 'use client'
 
-import { Lock, UserRoundCheck } from 'lucide-react'
+import { Dices, Lock, UserRoundCheck } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useActionState, useEffect, useReducer, useRef } from 'react'
 
@@ -9,6 +9,7 @@ import { cn } from '@/lib/cn'
 import type { PredictEditorVM } from '@/lib/view-models'
 
 import { savePredictionAction, type SaveState } from './actions'
+import { randomPicks } from './random-picks'
 import { draftReducer } from './reducer'
 import { ScorePicker } from './score-picker'
 
@@ -61,6 +62,46 @@ export function PredictionForm({ editor }: PredictionFormProps) {
    */
   const totalGoles = draft.home + draft.away
 
+  /**
+   * Modo aleatorio, para quien no tiene tiempo de elegir nombre por nombre.
+   *
+   * DEPENDE DEL MARCADOR: cuantos nombres saca y de que equipo lo dice el
+   * resultado que hayas puesto. Un 2-1 son dos del local y uno del visitante.
+   * Por eso con el marcador a 0-0 no hay nada que sortear y lo dice en vez de no
+   * hacer nada.
+   *
+   * Rellena los huecos y respeta lo que ya hubieras elegido. Cuando ya esta todo
+   * lleno el boton cambia de texto y vuelve a tirar: asi la pulsacion siempre
+   * hace algo y siempre se sabe qué.
+   */
+  const homePlayers = squads.find((s) => s.code === match.home.code)?.players ?? []
+  const awayPlayers = squads.find((s) => s.code === match.away.code)?.players ?? []
+  const sinPlantillas = homePlayers.length === 0 && awayPlayers.length === 0
+  const yaLleno =
+    totalGoles > 0 && draft.scorers.length >= totalGoles && draft.assists.length >= totalGoles
+
+  function tirarDado() {
+    if (totalGoles === 0) {
+      toast('Pon primero el marcador: en un 0-0 no hay goleadores que sortear.', 'bad')
+      return
+    }
+    if (sinPlantillas) {
+      toast('Todavía no tenemos las plantillas de estos dos equipos.', 'bad')
+      return
+    }
+    const picks = randomPicks({
+      homeGoals: draft.home,
+      awayGoals: draft.away,
+      homePlayers,
+      awayPlayers,
+      // Al volver a tirar se parte de cero; si no, se rellenan los huecos.
+      scorers: yaLleno ? [] : draft.scorers,
+      assists: yaLleno ? [] : draft.assists,
+    })
+    dispatch({ type: 'randomFill', ...picks })
+    toast(yaLleno ? 'Otra tirada.' : 'Sorteado. Cámbialo si no te gusta.')
+  }
+
   return (
     <form action={formAction}>
       <input type="hidden" name="matchId" value={match.id} />
@@ -93,6 +134,25 @@ export function PredictionForm({ editor }: PredictionFormProps) {
           emptyLabel="Elegir jugador"
           onToggle={(player) => dispatch({ type: 'toggleMvp', player })}
         />
+
+        {/* Antes de las dos listas, que es lo que rellena. */}
+        <div className="rounded-[16px] border border-line bg-card px-[14px] py-[12px]">
+          <Button
+            type="button"
+            variant="secondary"
+            size="lg"
+            fullWidth
+            onClick={tirarDado}
+            leading={<Dices size={17} strokeWidth={2.3} aria-hidden />}
+          >
+            {yaLleno ? 'Volver a tirar' : 'Modo aleatorio'}
+          </Button>
+          <p className="mt-[9px] text-[11.5px] font-semibold leading-[1.4] text-txt3">
+            {totalGoles === 0
+              ? 'Pon el marcador y esto te sortea los goleadores y los asistentes.'
+              : `Te sortea ${totalGoles} goleador${totalGoles === 1 ? '' : 'es'} y ${totalGoles} asistente${totalGoles === 1 ? '' : 's'} según tu ${draft.home}-${draft.away}. De la plantilla entera, titulares o suplentes. Puntúan igual que si los eliges tú.`}
+          </p>
+        </div>
 
         <PlayerSelect
           label="Goleadores"
