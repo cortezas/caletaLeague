@@ -111,8 +111,9 @@ function firstInitial(normalized: string): string {
  * Separa un nombre abreviado: "a. perez" o "a perez" -> `{ initial: 'a', surname: 'perez' }`.
  * `null` si no tiene esa forma.
  *
- * `normalizePlayer` NO quita los puntos, asi que el punto sigue ahi y se
- * contempla de forma explicita.
+ * El punto ya no llega hasta aqui: desde la migracion 0024 `normalizePlayer` lo
+ * convierte en espacio, asi que "A. Perez" entra como "a perez". El `\.?` del
+ * patron se queda por si algun dia se compara sin normalizar antes; no estorba.
  */
 function splitAbbreviated(normalized: string): { initial: string; surname: string } | null {
   const match = /^([a-z])\.?\s+(.+)$/.exec(normalized)
@@ -550,15 +551,74 @@ async function saveSubstitutions(
     return type === 'substitution' || type === 'subst'
   })
 
-  const filas = cambios.map((event) => ({
-    match_id: matchId,
-    minute: event.time === null || event.time === undefined ? null : String(event.time),
-    // Nombre tal cual, sin normalizar: normalizar es cosa de quien compare.
-    player_in: event.player ?? null,
-    player_out: event.substituted ?? null,
-    team: typeof event.team === 'string' ? event.team : (event.team?.name ?? null),
-    raw: event as unknown as Record<string, unknown>,
-  }))
+  // QUIEN ENTRA Y QUIEN SALE NO SE ASUME: SE DEDUCE.
+  //
+  // El tipo `HlEvent` dice "forma documentada en el encargo y asumida aqui": que
+  // `player` sea quien entra y `substituted` quien sale nunca se ha comprobado
+  // contra un cambio real. Y equivocarse ahi da los puntos del Sustituto + al que
+  // se fue al banquillo, sin que nadie lo note.
+  //
+  // Asi que se mira quien era TITULAR, que eso si lo tenemos guardado
+  // (`match_lineups`, migracion 0013): de los dos nombres de un cambio, el que
+  // salio de inicio es el que SALE. Es un hecho del partido, no una suposicion
+  // sobre el vocabulario de la API.
+  //
+  // Si la alineacion no esta guardada, o si ninguno de los dos era titular (paso
+  // el que entro antes y luego lo cambian: cadena), se respeta el orden de los
+  // campos y se anota, que es lo unico que se puede hacer.
+  const titulares = new Set<string>()
+  try {
+    const { data } = await admin
+      .from('match_lineups')
+      .select('home, away')
+      .eq('match_id', matchId)
+      .maybeSingle()
+    for (const lado of ['home', 'away'] as const) {
+      const side = (data as Record<string, unknown> | null)?.[lado] as
+        | { starters?: Array<{ name?: string | null }> | null }
+        | undefined
+      for (const jugador of side?.starters ?? []) {
+        const nombre = normalizePlayer(jugador?.name ?? '')
+        if (nombre !== '') titulares.add(nombre)
+      }
+    }
+  } catch {
+    // Sin alineacion se sigue: se usa el orden de los campos.
+  }
+
+  let invertidos = 0
+  const filas = cambios.map((event) => {
+    // Nombres tal cual, sin normalizar: normalizar es cosa de quien compare.
+    let entra = event.player ?? null
+    let sale = event.substituted ?? null
+
+    const entraEraTitular = entra !== null && titulares.has(normalizePlayer(entra))
+    const saleEraTitular = sale !== null && titulares.has(normalizePlayer(sale))
+
+    // Solo se invierte cuando esta CLARO: uno de los dos era titular y es el que
+    // los campos daban como entrante. Si los dos lo eran, o ninguno, no se toca.
+    if (entraEraTitular && !saleEraTitular) {
+      ;[entra, sale] = [sale, entra]
+      invertidos += 1
+    }
+
+    return {
+      match_id: matchId,
+      minute: event.time === null || event.time === undefined ? null : String(event.time),
+      player_in: entra,
+      player_out: sale,
+      team: typeof event.team === 'string' ? event.team : (event.team?.name ?? null),
+      raw: event as unknown as Record<string, unknown>,
+    }
+  })
+
+  if (invertidos > 0) {
+    warnings.push(
+      `${matchId}: ${invertidos} cambio(s) con los campos al revés de lo asumido ` +
+        '(`player` era el titular). Corregido con la alineación. Si se repite, hay que ' +
+        'cambiar la suposición en `HlEvent`.',
+    )
+  }
 
   try {
     if (filas.length > 0) {
