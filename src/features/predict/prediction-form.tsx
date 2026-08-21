@@ -1,6 +1,6 @@
 'use client'
 
-import { Lock } from 'lucide-react'
+import { Lock, UserRoundCheck } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useActionState, useEffect, useReducer, useRef } from 'react'
 
@@ -141,6 +141,24 @@ export function PredictionForm({ editor }: PredictionFormProps) {
           <p className="text-[12.5px] font-semibold leading-[1.45] text-txt2">
             Se sella al pitido inicial. Hasta entonces puedes cambiarlo las veces que quieras y{' '}
             <b className="font-extrabold text-txt">nadie lo ve</b>.
+          </p>
+        </div>
+
+        {/* La regla existe desde la migracion 0026 y no se veia en ningun sitio:
+            una regla que reparte puntos y nadie conoce solo sirve para que
+            parezca que la app se equivoca. */}
+        <div className="flex gap-[9px] rounded-[16px] border border-line bg-card px-[14px] py-[12px]">
+          <UserRoundCheck
+            size={16}
+            strokeWidth={2.1}
+            aria-hidden
+            className="mt-[1px] flex-none text-ok"
+          />
+          <p className="text-[12.5px] font-semibold leading-[1.45] text-txt2">
+            <b className="font-extrabold text-txt">Sustituto +</b>: si cambian a tu goleador o
+            asistente, <b className="font-extrabold text-txt">su relevo también te cuenta</b>. Y si
+            cambian al relevo, sigue. No hace falta poner a los dos: no suma el doble y gastas un
+            hueco. El MVP no entra.
           </p>
         </div>
       </div>

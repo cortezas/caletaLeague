@@ -133,7 +133,17 @@ export type PiqueVM = {
     memberId: string; displayName: string; avatarColor: string; avatarUrl: string | null; isMe: boolean
     home: number; away: number; mvp: string | null; scorers: string[]; assists: string[]
     points: number; exact: boolean; signHit: boolean
-    chips: Array<{ kind: PiqueChipKind; label: string; hit: boolean }>
+    chips: Array<{
+      kind: PiqueChipKind
+      label: string
+      hit: boolean
+      /**
+       * Quien lo hizo de verdad, cuando el acierto entra por el Sustituto +
+       * (migracion 0026). Sin esto el chip sale verde con un nombre que no esta
+       * entre los goleadores del partido, y no hay forma de entenderlo.
+       */
+      via?: string
+    }>
   }>
   memberCount: number
 }

@@ -91,6 +91,14 @@ export function PiqueRow({ row }: PiqueRowProps) {
               {chip.hit && <Check size={9} strokeWidth={4} aria-hidden className="flex-none" />}
               {Icon && <Icon size={11} strokeWidth={2.2} aria-hidden className="flex-none" />}
               {chip.label}
+              {/* Sustituto +: el acierto lo hizo su relevo. Sin decirlo, el chip
+                  sale verde con un nombre que no esta entre los goleadores del
+                  partido y no hay forma de entenderlo. */}
+              {chip.via && (
+                <span className="font-normal opacity-80">
+                  {'→'} {chip.via}
+                </span>
+              )}
             </span>
           )
         })}

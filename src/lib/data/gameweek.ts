@@ -383,6 +383,55 @@ export async function getMatchEditor(matchId: string): Promise<PredictEditorVM |
   }
 }
 
+/** Un cambio del partido: quien entro por quien. */
+type Substitution = { playerIn: string; playerOut: string }
+
+/**
+ * Los cambios de un partido (migracion 0025). Vacio es lo normal: solo hay datos
+ * de los partidos jugados desde que se empezo a guardarlos.
+ */
+async function fetchSubstitutions(ctx: DataContext, matchId: string): Promise<Substitution[]> {
+  const { data, error } = await ctx.supabase
+    .from('match_substitutions')
+    .select('player_in, player_out')
+    .eq('match_id', matchId)
+  // Un fallo aqui no puede tumbar el pique: sin cambios, los chips se comportan
+  // como antes de que existiera el Sustituto +.
+  if (error || !data) return []
+  return (data as Array<{ player_in: string | null; player_out: string | null }>)
+    .filter((row) => row.player_in !== null && row.player_out !== null)
+    .map((row) => ({ playerIn: row.player_in as string, playerOut: row.player_out as string }))
+}
+
+/**
+ * Si el nombre elegido acerto, DEVUELVE QUIEN LO HIZO; `null` si no acerto.
+ *
+ * Es el espejo en pantalla de `expand_with_subs` (migracion 0026): sigue la
+ * cadena de relevos igual que la vista que reparte los puntos. Sin esto, un
+ * acierto por Sustituto + sumaba puntos pero el chip salia en rojo, y la pantalla
+ * se contradecia con la clasificacion.
+ *
+ * El tope de cuatro saltos y la lista de vistos son los mismos que en SQL: un
+ * dato malo (A sale por B y B sale por A) no puede colgar la pantalla.
+ */
+function hitVia(picked: string, real: string[], subs: Substitution[]): string | null {
+  let actual = picked
+  const vistos = [normalizePlayer(picked)]
+
+  for (let salto = 0; salto <= 4; salto++) {
+    const acierto = real.find((name) => samePlayer(name, actual))
+    if (acierto !== undefined) return acierto
+
+    const cambio = subs.find((sub) => samePlayer(sub.playerOut, actual))
+    if (!cambio) return null
+    const siguiente = normalizePlayer(cambio.playerIn)
+    if (vistos.includes(siguiente)) return null
+    vistos.push(siguiente)
+    actual = cambio.playerIn
+  }
+  return null
+}
+
 /**
  * El pique: que puso cada uno. `null` si el partido no existe, no es visible o
  * NO HA EMPEZADO todavia.
@@ -412,10 +461,11 @@ export async function getMatchPique(matchId: string): Promise<PiqueVM | null> {
   // que se venia a ver.
   const result = resultOrLiveOf(row, ctx.now)
 
-  const [predictions, points, forms] = await Promise.all([
+  const [predictions, points, forms, subs] = await Promise.all([
     fetchPredictions(ctx, [row.id]),
     fetchPoints(ctx, [row.id]),
     fetchTeamForms(),
+    fetchSubstitutions(ctx, row.id),
   ])
 
   const pointsByMember = new Map(points.map((p) => [p.member_id, p]))
@@ -445,19 +495,26 @@ export async function getMatchPique(matchId: string): Promise<PiqueVM | null> {
       ]
       if (prediction.noGoals) chips.push({ kind: 'noGoals', label: 'Sin goles', hit: goalless })
       for (const scorer of prediction.scorers) {
+        const via = hitVia(scorer, result?.scorers ?? [], subs)
         chips.push({
           kind: 'scorer',
           label: scorer,
-          hit: (result?.scorers ?? []).some((real: string) => samePlayer(real, scorer)),
+          hit: via !== null,
+          // Quien marco de verdad, cuando el acierto viene por el Sustituto +.
+          // Sin esto el chip sale verde y nadie entiende por que: el nombre que
+          // se ve no esta en la lista de goleadores del partido.
+          via: via && via !== scorer ? via : undefined,
         })
       }
       // Detras de los goles y con `kind` propio: el mismo nombre puede estar en
       // las dos listas y hay que poder distinguir de que acierto se habla.
       for (const assist of prediction.assists) {
+        const via = hitVia(assist, result?.assists ?? [], subs)
         chips.push({
           kind: 'assist',
           label: assist,
-          hit: (result?.assists ?? []).some((real: string) => samePlayer(real, assist)),
+          hit: via !== null,
+          via: via && via !== assist ? via : undefined,
         })
       }
 
