@@ -588,15 +588,21 @@ async function saveSubstitutions(
 
   let invertidos = 0
   const filas = cambios.map((event) => {
+    // OJO AL ORDEN: `player` es quien SALE y `substituted` quien ENTRA, al reves
+    // de lo que sugieren los nombres. Verificado el 20/08/2026 con la respuesta
+    // real del ATM-MAL (ver la nota en `HlEvent.substituted`).
+    //
     // Nombres tal cual, sin normalizar: normalizar es cosa de quien compare.
-    let entra = event.player ?? null
-    let sale = event.substituted ?? null
+    let entra = event.substituted ?? null
+    let sale = event.player ?? null
 
     const entraEraTitular = entra !== null && titulares.has(normalizePlayer(entra))
     const saleEraTitular = sale !== null && titulares.has(normalizePlayer(sale))
 
-    // Solo se invierte cuando esta CLARO: uno de los dos era titular y es el que
-    // los campos daban como entrante. Si los dos lo eran, o ninguno, no se toca.
+    // Red de seguridad, ya con el orden bueno de fabrica: si algun dia la API
+    // cambia y el que figura como entrante resulta ser el titular, se corrige y
+    // se avisa. Si los dos eran titulares, o ninguno (una cadena de relevos), no
+    // se toca nada.
     if (entraEraTitular && !saleEraTitular) {
       ;[entra, sale] = [sale, entra]
       invertidos += 1
@@ -614,9 +620,9 @@ async function saveSubstitutions(
 
   if (invertidos > 0) {
     warnings.push(
-      `${matchId}: ${invertidos} cambio(s) con los campos al revés de lo asumido ` +
-        '(`player` era el titular). Corregido con la alineación. Si se repite, hay que ' +
-        'cambiar la suposición en `HlEvent`.',
+      `${matchId}: ${invertidos} cambio(s) con los campos al revés de lo verificado ` +
+        'el 20/08/2026. Corregido con la alineación. Si se repite, la API ha cambiado y hay ' +
+        'que revisar `HlEvent.substituted`.',
     )
   }
 

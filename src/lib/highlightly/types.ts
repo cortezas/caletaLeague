@@ -110,7 +110,21 @@ export interface HlEvent {
   /** Asistente. Ausente o vacio en los goles sin asistencia (penaltis, jugadas individuales). */
   assist?: string | null
   assistingPlayerId?: number | string | null
-  /** En las sustituciones, quien sale. No se usa para goleadores. */
+  /**
+   * En las sustituciones, quien ENTRA. Y `player` es quien SALE.
+   *
+   * SI, AL REVES DE LO QUE SUGIEREN LOS NOMBRES. Verificado el 20/08/2026
+   * contra la respuesta real del ATM-MAL del dia 19:
+   *
+   *   min 57  Substitution  player: "C. Martin"   substituted: "Lee Kang-In"
+   *   min 70  Goal          player: "Lee Kang-In"
+   *
+   * Si `substituted` fuera el que sale, Lee Kang-In se habria ido en el 57 y
+   * habria marcado en el 70. Ademas, los cuatro `player` de los cambios de ese
+   * partido son los que SALIAN en el once inicial que guardamos.
+   *
+   * No se usa para goleadores.
+   */
   substituted?: string | null
   /** Matiz del evento cuando la API lo manda. NO verificado. */
   detail?: string | null
