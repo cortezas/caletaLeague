@@ -414,7 +414,7 @@ async function fetchSubstitutions(ctx: DataContext, matchId: string): Promise<Su
  * El tope de cuatro saltos y la lista de vistos son los mismos que en SQL: un
  * dato malo (A sale por B y B sale por A) no puede colgar la pantalla.
  */
-function hitVia(picked: string, real: string[], subs: Substitution[]): string | null {
+export function hitVia(picked: string, real: string[], subs: Substitution[]): string | null {
   let actual = picked
   const vistos = [normalizePlayer(picked)]
 
@@ -430,6 +430,29 @@ function hitVia(picked: string, real: string[], subs: Substitution[]): string | 
     actual = cambio.playerIn
   }
   return null
+}
+
+/**
+ * Reparte los goleadores reales entre los nombres que puso la persona, UNO A UNO.
+ * Devuelve, en el mismo orden, quien acerto cada nombre o `null`.
+ *
+ * SE CONSUME: un solo gol no puede pintar dos chips verdes. Quien pronosticaba el
+ * doblete de Mariano (el mismo nombre dos veces, que el editor permite) y veia a
+ * Mariano marcar UNA vez tenia dos chips verdes y cobraba un acierto.
+ *
+ * Es el espejo del tope de `public.hits_subs` (migracion 0027): nunca puede haber
+ * mas chips verdes que aciertos cobrados. Y como `hitVia` prueba el nombre tal
+ * cual antes de seguir la cadena de relevos, cada nombre se queda con su propio
+ * gol cuando lo tiene, y solo tira del Sustituto + si no.
+ */
+export function assignHits(picked: string[], real: string[], subs: Substitution[]): (string | null)[] {
+  const quedan = [...real]
+  return picked.map((pick) => {
+    const via = hitVia(pick, quedan, subs)
+    if (via === null) return null
+    quedan.splice(quedan.indexOf(via), 1)
+    return via
+  })
 }
 
 /**
@@ -494,8 +517,9 @@ export async function getMatchPique(matchId: string): Promise<PiqueVM | null> {
         { kind: 'mvp', label: `MVP: ${prediction.mvp ?? '—'}`, hit: mvpHit },
       ]
       if (prediction.noGoals) chips.push({ kind: 'noGoals', label: 'Sin goles', hit: goalless })
-      for (const scorer of prediction.scorers) {
-        const via = hitVia(scorer, result?.scorers ?? [], subs)
+      const scorerHits = assignHits(prediction.scorers, result?.scorers ?? [], subs)
+      prediction.scorers.forEach((scorer, i) => {
+        const via = scorerHits[i]
         chips.push({
           kind: 'scorer',
           label: scorer,
@@ -503,20 +527,26 @@ export async function getMatchPique(matchId: string): Promise<PiqueVM | null> {
           // Quien marco de verdad, cuando el acierto viene por el Sustituto +.
           // Sin esto el chip sale verde y nadie entiende por que: el nombre que
           // se ve no esta en la lista de goleadores del partido.
-          via: via && via !== scorer ? via : undefined,
+          //
+          // Se compara con `samePlayer` y no con `!==`: poner "Lee Kang In" y que
+          // la API lo escriba "Lee Kang-In" es un acierto normal, y con `!==`
+          // salia la flecha del Sustituto + en un partido donde nadie fue
+          // sustituido.
+          via: via !== null && !samePlayer(via, scorer) ? via : undefined,
         })
-      }
+      })
       // Detras de los goles y con `kind` propio: el mismo nombre puede estar en
       // las dos listas y hay que poder distinguir de que acierto se habla.
-      for (const assist of prediction.assists) {
-        const via = hitVia(assist, result?.assists ?? [], subs)
+      const assistHits = assignHits(prediction.assists, result?.assists ?? [], subs)
+      prediction.assists.forEach((assist, i) => {
+        const via = assistHits[i]
         chips.push({
           kind: 'assist',
           label: assist,
           hit: via !== null,
-          via: via && via !== assist ? via : undefined,
+          via: via !== null && !samePlayer(via, assist) ? via : undefined,
         })
-      }
+      })
 
       return {
         prediction,
@@ -560,15 +590,17 @@ export async function getMatchPique(matchId: string): Promise<PiqueVM | null> {
   // Destacados contados sobre los pronosticos reales, nunca cableados.
   const exactCount = rows.filter((r) => r.exact).length
   const mvpCount = entries.filter((e) => e.mvpHit).length
+  // El Sustituto + cuenta tambien aqui. Sin esto, el destacado decia "nadie
+  // acerto el goleador" justo encima de una fila con el chip en verde y los
+  // puntos cobrados: tres numeros de la misma pantalla contando cosas distintas.
+  const cubre = (picks: string[], real: string) => picks.some((p) => hitVia(p, [real], subs) !== null)
   const scorersCount = goalless
     ? entries.filter((e) => e.prediction.noGoals).length
-    : entries.filter((e) =>
-        result.scorers.every((real) => e.prediction.scorers.some((s) => samePlayer(s, real))),
-      ).length
+    : entries.filter((e) => result.scorers.every((real) => cubre(e.prediction.scorers, real))).length
   // Mismo criterio que los goleadores, para que las dos cifras se lean igual:
-  // quien tenia TODOS los asistentes reales en su lista.
+  // quien tenia TODOS los asistentes reales cubiertos.
   const assistsCount = entries.filter((e) =>
-    result.assists.every((real) => e.prediction.assists.some((a) => samePlayer(a, real))),
+    result.assists.every((real) => cubre(e.prediction.assists, real)),
   ).length
   const anyoneGuessedAssists = entries.some((e) => e.prediction.assists.length > 0)
 

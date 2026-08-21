@@ -125,7 +125,7 @@ function readProvidedSecret(request: Request): string | null {
   return null
 }
 
-export async function POST(request: Request) {
+async function ejecutar(request: Request) {
   if (!CRON_SECRET) {
     return Response.json(
       {
@@ -241,9 +241,31 @@ export async function POST(request: Request) {
   }
 }
 
-export async function GET() {
-  return Response.json(
-    { ok: false, error: 'Usa POST con la cabecera X-Cron-Secret.' },
-    { status: 405, headers: { Allow: 'POST' } },
-  )
+export async function POST(request: Request) {
+  return ejecutar(request)
+}
+
+/**
+ * El cron de Vercel invoca con GET, no con POST.
+ *
+ * `vercel.json` declara un cron sobre esta ruta desde el principio y NUNCA ha
+ * hecho nada: llegaba un GET y se iba con un 405. La ingesta entera dependia de
+ * un solo hilo, el workflow de GitHub Actions, sin la red de seguridad que el
+ * propio `cron.yml` dice tener. Y GitHub apaga los crons de los repos inactivos.
+ *
+ * Un GET SIN el secreto sigue respondiendo 405 exactamente igual que antes -- que
+ * un navegador o un prefetch abran la URL no puede lanzar una sincronizacion, y
+ * el 405 (en vez de un 401) no le confirma a nadie que aqui haya un secreto que
+ * adivinar. Vercel manda `Authorization: Bearer $CRON_SECRET`, que es lo que
+ * `readProvidedSecret` ya sabe leer.
+ */
+export async function GET(request: Request) {
+  const provided = CRON_SECRET ? readProvidedSecret(request) : null
+  if (!provided || !CRON_SECRET || !secretMatches(provided, CRON_SECRET)) {
+    return Response.json(
+      { ok: false, error: 'Usa POST con la cabecera X-Cron-Secret.' },
+      { status: 405, headers: { Allow: 'POST' } },
+    )
+  }
+  return ejecutar(request)
 }

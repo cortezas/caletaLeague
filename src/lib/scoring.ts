@@ -14,6 +14,16 @@
  * Los nombres de jugador se comparan con `samePlayer` (src/lib/squads.ts) y no
  * con `===`: se escriben a mano, asi que "Vinicius" y "Vinícius" tienen que
  * puntuar igual. La funcion SQL hace la misma normalizacion.
+ *
+ * EL SUSTITUTO + NO ESTA AQUI, y es a proposito. Esa regla necesita los cambios
+ * del partido, que viven en `match_substitutions`, y este modulo no toca la base
+ * de datos: es para el modo sin base y para los tests. En produccion la aplica
+ * `public.calc_points_subs` (migracion 0027), que reutiliza `calc_points` para el
+ * marcador y el MVP y solo cambia el recuento de goleadores y asistentes. Su
+ * espejo en pantalla es `hitVia`/`assignHits` en src/lib/data/gameweek.ts.
+ *
+ * O sea: `calc_points` <-> este fichero siguen siendo espejos exactos. Quien
+ * quiera tocar el Sustituto + tiene que tocar `hits_subs` (SQL) y `hitVia` (TS).
  */
 
 import { normalizePlayer, samePlayer } from './squads'

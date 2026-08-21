@@ -526,12 +526,20 @@ const DEFAULT_SINCE_DAYS = 8
 /**
  * Guarda los cambios de un partido. PASO 1 del "Sustituto +" (migracion 0025).
  *
- * Solo MIRA: no reparte puntos ni cambia nada de lo que ya hay. Se guarda nuestra
- * interpretacion de los dos nombres Y el evento entero en `raw`, porque la forma
- * del evento NO esta verificada -- el tipo `HlEvent` dice literalmente "forma
- * documentada en el encargo y asumida aqui". Que `player` sea quien entra y
- * `substituted` quien sale es una suposicion, y montar la regla de puntos encima
- * sin comprobarlo daria los puntos al que se fue al banquillo.
+ * No cambia nada de lo que ya hay. Se guarda nuestra interpretacion de los dos
+ * nombres Y el evento entero en `raw`: la forma del evento se verifico el
+ * 20/08/2026 contra un cambio real (ver `HlEvent.substituted`), pero esto reparte
+ * puntos, y guardar el original es lo que permite auditar un punto discutido en
+ * vez de discutirlo de memoria.
+ *
+ * LOS NOMBRES SE CANONIZAN CONTRA LA PLANTILLA, igual que los goleadores.
+ * Los dos endpoints de Highlightly no se ponen de acuerdo entre ellos: en el
+ * ATM-MAL la alineacion decia "Kang-in Lee" y los eventos "Lee Kang-In". Y los
+ * pronosticos SIEMPRE llevan la grafia de `team_squads`, porque se eligen de una
+ * lista. Medido contra los 315 nombres ya guardados: sin canonizar, el 17% de los
+ * titulares y el 40% de los suplentes no casan con ninguna grafia posible, o sea
+ * que del orden de la mitad de los Sustituto + moririan EN SILENCIO -- sin chip,
+ * sin punto y sin aviso, que es la peor forma de fallar.
  *
  * NUNCA LANZA. Esto es informacion de mas: si falla, los goleadores -- que es lo
  * que de verdad puntua -- tienen que entrar igual. El fallo viaja en `warnings`.
@@ -545,6 +553,7 @@ async function saveSubstitutions(
   matchId: string,
   events: HlEvent[],
   warnings: string[],
+  squadFor: (team: string | null) => string[],
 ): Promise<number> {
   const cambios = events.filter((event) => {
     const type = (event.type ?? '').trim().toLowerCase()
@@ -587,7 +596,7 @@ async function saveSubstitutions(
   }
 
   let invertidos = 0
-  const filas = cambios.map((event) => {
+  const todas = cambios.map((event) => {
     // OJO AL ORDEN: `player` es quien SALE y `substituted` quien ENTRA, al reves
     // de lo que sugieren los nombres. Verificado el 20/08/2026 con la respuesta
     // real del ATM-MAL (ver la nota en `HlEvent.substituted`).
@@ -608,15 +617,46 @@ async function saveSubstitutions(
       invertidos += 1
     }
 
+    const team = typeof event.team === 'string' ? event.team : (event.team?.name ?? null)
+    // A la grafia de `team_squads`, que es la que llevan los pronosticos. Sin
+    // esto la cadena de relevos compara "Kang-in Lee" contra "Lee Kang-In" y no
+    // encuentra nada.
+    const squad = squadFor(team)
+    const canon = (name: string | null): string | null =>
+      name === null ? null : resolvePlayerName(name, squad).resolved
+
     return {
       match_id: matchId,
       minute: event.time === null || event.time === undefined ? null : String(event.time),
-      player_in: entra,
-      player_out: sale,
-      team: typeof event.team === 'string' ? event.team : (event.team?.name ?? null),
+      player_in: canon(entra),
+      player_out: canon(sale),
+      team,
       raw: event as unknown as Record<string, unknown>,
     }
   })
+
+  // Deduplicado ANTES de mandarlo, por la misma clave que usa el `onConflict`.
+  //
+  // Postgres no tolera dos filas iguales en la MISMA sentencia con ON CONFLICT
+  // DO UPDATE: revienta con "cannot affect row a second time" y se cae el upsert
+  // entero, o sea cero cambios guardados para ese partido. Y que este feed
+  // duplique eventos no es una hipotesis: ya hay codigo aqui mismo descartando
+  // los 'Penalty' que duplican a los 'Goal'.
+  //
+  // Y con el minuto a null la UNIQUE tampoco los ve (null <> null en SQL), asi
+  // que ese caso solo se puede cortar aqui.
+  const vistas = new Set<string>()
+  const filas = todas.filter((fila) => {
+    const clave = `${fila.minute ?? '?'}|${normalizePlayer(fila.player_in ?? '')}|${normalizePlayer(fila.player_out ?? '')}`
+    if (vistas.has(clave)) return false
+    vistas.add(clave)
+    return true
+  })
+  if (filas.length < todas.length) {
+    warnings.push(
+      `${matchId}: ${todas.length - filas.length} cambio(s) repetido(s) en la respuesta, descartados antes de guardar.`,
+    )
+  }
 
   if (invertidos > 0) {
     warnings.push(
@@ -827,6 +867,17 @@ export async function syncMatchEvents(options: EventsSyncOptions = {}): Promise<
       const realScore = `${local.realHome}-${local.realAway}`
       const totalGoals = local.realHome + local.realAway
 
+      /** La plantilla del equipo del evento; si no se sabe, las dos juntas. */
+      const squadFor = (team: string | null): string[] => {
+        const home = squadByTeam.get(local.homeCode) ?? []
+        const away = squadByTeam.get(local.awayCode) ?? []
+        if (!team) return [...home, ...away]
+        const resolved = resolveTeamSide(team, local.homeCode, local.awayCode)
+        if (resolved === 'home') return home
+        if (resolved === 'away') return away
+        return [...home, ...away]
+      }
+
       let events: HlEvent[]
       try {
         events = await getMatchEvents(pair.api.apiId, { budget })
@@ -850,7 +901,7 @@ export async function syncMatchEvents(options: EventsSyncOptions = {}): Promise<
 
       // Paso 1 del Sustituto +: se guardan los cambios que acabamos de recibir.
       // No cuesta ni una peticion mas: los eventos ya estan aqui.
-      subsSaved += await saveSubstitutions(admin, local.id, events, warnings)
+      subsSaved += await saveSubstitutions(admin, local.id, events, warnings, squadFor)
 
       const extraction = extractGoals(events, totalGoals)
       for (const type of extraction.unknownEventTypes) unknownEventTypes.add(type)
@@ -928,17 +979,6 @@ export async function syncMatchEvents(options: EventsSyncOptions = {}): Promise<
       const assists: string[] = []
       const seenScorer = new Set<string>()
       const seenAssist = new Set<string>()
-
-      /** La plantilla del equipo del evento; si no se sabe, las dos juntas. */
-      const squadFor = (team: string | null): string[] => {
-        const home = squadByTeam.get(local.homeCode) ?? []
-        const away = squadByTeam.get(local.awayCode) ?? []
-        if (!team) return [...home, ...away]
-        const resolved = resolveTeamSide(team, local.homeCode, local.awayCode)
-        if (resolved === 'home') return home
-        if (resolved === 'away') return away
-        return [...home, ...away]
-      }
 
       for (const goal of extraction.goals) {
         const squad = squadFor(goal.team)
