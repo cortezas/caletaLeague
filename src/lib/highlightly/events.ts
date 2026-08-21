@@ -419,6 +419,8 @@ export interface EventsSyncReport {
   leagueId: string | null
   /** Partidos jugados sin goleadores que se han intentado resolver. */
   pending: number
+  /** Cambios guardados en esta pasada (migracion 0025). Solo informativo. */
+  subsSaved: number
   /** Peticiones gastadas en esta pasada, en total y por concepto. */
   requestsSpent: number
   requestsByKind: { matchesByDate: number; events: number }
@@ -520,6 +522,68 @@ interface PendingMatch extends LocalMatch {
 const DEFAULT_MAX_REQUESTS = 40
 const DEFAULT_SINCE_DAYS = 8
 
+/**
+ * Guarda los cambios de un partido. PASO 1 del "Sustituto +" (migracion 0025).
+ *
+ * Solo MIRA: no reparte puntos ni cambia nada de lo que ya hay. Se guarda nuestra
+ * interpretacion de los dos nombres Y el evento entero en `raw`, porque la forma
+ * del evento NO esta verificada -- el tipo `HlEvent` dice literalmente "forma
+ * documentada en el encargo y asumida aqui". Que `player` sea quien entra y
+ * `substituted` quien sale es una suposicion, y montar la regla de puntos encima
+ * sin comprobarlo daria los puntos al que se fue al banquillo.
+ *
+ * NUNCA LANZA. Esto es informacion de mas: si falla, los goleadores -- que es lo
+ * que de verdad puntua -- tienen que entrar igual. El fallo viaja en `warnings`.
+ *
+ * Se sella `subs_fetched_at` pase lo que pase, incluso con cero cambios: un
+ * partido sin ninguno no deja filas, y sin la marca se volveria a pedir en cada
+ * pasada del cron para siempre.
+ */
+async function saveSubstitutions(
+  admin: SupabaseClient,
+  matchId: string,
+  events: HlEvent[],
+  warnings: string[],
+): Promise<number> {
+  const cambios = events.filter((event) => {
+    const type = (event.type ?? '').trim().toLowerCase()
+    return type === 'substitution' || type === 'subst'
+  })
+
+  const filas = cambios.map((event) => ({
+    match_id: matchId,
+    minute: event.time === null || event.time === undefined ? null : String(event.time),
+    // Nombre tal cual, sin normalizar: normalizar es cosa de quien compare.
+    player_in: event.player ?? null,
+    player_out: event.substituted ?? null,
+    team: typeof event.team === 'string' ? event.team : (event.team?.name ?? null),
+    raw: event as unknown as Record<string, unknown>,
+  }))
+
+  try {
+    if (filas.length > 0) {
+      const { error } = await admin
+        .from('match_substitutions')
+        .upsert(filas, { onConflict: 'match_id,minute,player_in,player_out' })
+      if (error) throw new Error(error.message)
+    }
+    const { error: mark } = await admin
+      .from('matches')
+      .update({ subs_fetched_at: new Date().toISOString() })
+      .eq('id', matchId)
+    if (mark) throw new Error(mark.message)
+  } catch (error) {
+    warnings.push(
+      `${matchId}: no se pudieron guardar los cambios (${
+        error instanceof Error ? error.message : String(error)
+      }). Los goleadores no se ven afectados.`,
+    )
+    return 0
+  }
+
+  return filas.length
+}
+
 export async function syncMatchEvents(options: EventsSyncOptions = {}): Promise<EventsSyncReport> {
   const startedAt = Date.now()
   const budgetLimit = Math.max(1, options.maxRequests ?? DEFAULT_MAX_REQUESTS)
@@ -529,6 +593,8 @@ export async function syncMatchEvents(options: EventsSyncOptions = {}): Promise<
   const unknownEventTypes = new Set<string>()
   let requestsByDate = 0
   let requestsEvents = 0
+  /** Cambios guardados en esta pasada. Solo informativo (paso 1 del Sustituto +). */
+  let subsSaved = 0
   let namesTotal = 0
   let namesMatched = 0
 
@@ -537,6 +603,9 @@ export async function syncMatchEvents(options: EventsSyncOptions = {}): Promise<
     skipped: false,
     leagueId: null,
     pending: 0,
+    // Se rellena aqui y no en cada `return`: es un contador de la pasada, y en
+    // los caminos de salida temprana vale 0 igualmente.
+    subsSaved,
     requestsSpent: budget.spent,
     requestsByKind: { matchesByDate: requestsByDate, events: requestsEvents },
     requestBudget: budgetLimit,
@@ -712,6 +781,10 @@ export async function syncMatchEvents(options: EventsSyncOptions = {}): Promise<
         })
         continue
       }
+
+      // Paso 1 del Sustituto +: se guardan los cambios que acabamos de recibir.
+      // No cuesta ni una peticion mas: los eventos ya estan aqui.
+      subsSaved += await saveSubstitutions(admin, local.id, events, warnings)
 
       const extraction = extractGoals(events, totalGoals)
       for (const type of extraction.unknownEventTypes) unknownEventTypes.add(type)
