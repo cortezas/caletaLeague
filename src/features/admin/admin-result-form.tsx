@@ -140,14 +140,31 @@ export function AdminResultForm({ matches, memberCount }: AdminResultFormProps) 
   /**
    * Goleadores y asistentes son listas INDEPENDIENTES: el mismo jugador puede
    * estar en las dos y son dos aciertos. Se compara con `samePlayer` para que
-   * "Mbappe" no entre otra vez como "Mbappé".
+   * "Mbappe" no entre otra vez como "Mbappé", y se reutiliza la grafia que ya
+   * este en la lista.
+   *
+   * SUMA UNA APARICION, no alterna. Pulsar dos veces al mismo jugador es como se
+   * anota un DOBLETE, que es justo lo que `calc_points` cuenta desde la migracion
+   * 0022. Antes la segunda pulsacion lo quitaba, asi que un doblete real no se
+   * podia escribir aqui ni para corregir un partido: el Elche 0-5 Barcelona se
+   * guardo con 3 nombres para 5 goles y este formulario no permitia arreglarlo.
+   *
+   * Es el mismo par `addOne`/`removeOne` del editor de pronosticos
+   * (src/features/predict/reducer.ts), que ya se migro en su dia y aqui se quedo
+   * sin migrar.
    */
-  function toggleList(id: string, key: 'scorers' | 'assists', name: string) {
+  function addToList(id: string, key: 'scorers' | 'assists', name: string) {
     const list = rows[id]?.[key] ?? []
-    const next = list.some((chosen) => samePlayer(chosen, name))
-      ? list.filter((chosen) => !samePlayer(chosen, name))
-      : [...list, name]
-    patch(id, { [key]: next })
+    const yaEsta = list.find((chosen) => samePlayer(chosen, name))
+    patch(id, { [key]: [...list, yaEsta ?? name] })
+  }
+
+  /** Quita UNA aparicion, la ultima. Con un doblete, baja a un gol. */
+  function removeFromList(id: string, key: 'scorers' | 'assists', name: string) {
+    const list = rows[id]?.[key] ?? []
+    const i = list.map((chosen) => samePlayer(chosen, name)).lastIndexOf(true)
+    if (i === -1) return
+    patch(id, { [key]: [...list.slice(0, i), ...list.slice(i + 1)] })
   }
 
   // El payload viaja en un solo campo: son 10 partidos con tres listas de
@@ -218,22 +235,24 @@ export function AdminResultForm({ matches, memberCount }: AdminResultFormProps) 
                 />
                 <PlayerSelect
                   label="Goleadores"
-                  hint="Uno por gol, sin orden"
+                  hint="Uno por gol. Dos veces al mismo = doblete"
                   squads={squads}
                   selected={row.scorers}
                   multiple
                   suggestions={match.players}
-                  onToggle={(name) => toggleList(match.id, 'scorers', name)}
+                  onToggle={(name) => addToList(match.id, 'scorers', name)}
+                  onRemove={(name) => removeFromList(match.id, 'scorers', name)}
                   emptyLabel="Sin goleadores"
                 />
                 <PlayerSelect
                   label="Asistentes"
-                  hint="Quien da el pase de gol"
+                  hint="Uno por asistencia. Dos veces al mismo = dos pases"
                   squads={squads}
                   selected={row.assists}
                   multiple
                   suggestions={match.players}
-                  onToggle={(name) => toggleList(match.id, 'assists', name)}
+                  onToggle={(name) => addToList(match.id, 'assists', name)}
+                  onRemove={(name) => removeFromList(match.id, 'assists', name)}
                   emptyLabel="Sin asistentes"
                 />
               </div>

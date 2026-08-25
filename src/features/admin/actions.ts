@@ -94,19 +94,30 @@ type ResultInput = {
 const MAX_REAL_SCORERS = 20
 const MAX_PLAYER_NAME = 40
 
-/** Recorta, colapsa espacios, tira vacios y deduplica por nombre normalizado. */
+/**
+ * Recorta, colapsa espacios y tira vacios. NO deduplica.
+ *
+ * Deduplicaba por nombre normalizado, y eso hacia IMPOSIBLE anotar un doblete a
+ * mano. `calc_points` cuenta las veces desde la migracion 0022 -- un goleador que
+ * marca dos veces tiene que aparecer dos veces --, asi que el deduplicado se
+ * comia justo el caso que hay que poder escribir.
+ *
+ * No es teoria: la ingesta tenia el mismo fallo y guardo el Elche 0-5 Barcelona
+ * con 3 nombres para 5 goles (Raphinha 14' y 67', Fermin 71' y 79'). Al ir a
+ * corregirlo desde aqui, esta funcion lo habria vuelto a colapsar.
+ *
+ * Repetir un nombre por error no rompe nada: `least(veces_puestas, veces_reales)`
+ * no paga mas aciertos de los goles que hubo, y `MAX_REAL_SCORERS` sigue de tope.
+ */
 function tidyNames(raw: unknown[]): string[] | null {
   const out: string[] = []
-  const seen = new Set<string>()
 
   for (const value of raw) {
     if (typeof value !== 'string') return null
     const name = value.trim().replace(/\s+/g, ' ')
     if (name === '') continue
     if (name.length > MAX_PLAYER_NAME) return null
-    const key = normalizePlayer(name)
-    if (key === '' || seen.has(key)) continue
-    seen.add(key)
+    if (normalizePlayer(name) === '') continue
     out.push(name)
   }
 
