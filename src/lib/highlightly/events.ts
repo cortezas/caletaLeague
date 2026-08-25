@@ -78,6 +78,9 @@ export interface NameResolution {
     | 'initial-surname'
     | 'surname'
     | 'given-name'
+    | 'mismas-palabras'
+    | 'una-palabra'
+    | 'prefijo'
     | 'ambiguous'
     | 'no-squad'
     | 'no-match'
@@ -100,6 +103,28 @@ function surnameVariants(normalized: string): string[] {
   const out: string[] = []
   for (let i = 1; i < tokens.length; i += 1) out.push(tokens.slice(i).join(' '))
   return out
+}
+
+/**
+ * Los apellidos SUELTOS de un nombre normalizado.
+ * "aitor paredes casamichana" -> ["paredes", "casamichana"].
+ *
+ * `surnameVariants` da los sufijos ("paredes casamichana", "casamichana") y eso
+ * no basta: la API abrevia por el PRIMER apellido ("A. Paredes") y ahi no hay
+ * ningun sufijo que valga "paredes" a secas. Con los tokens sueltos a los dos
+ * lados basta con que se toquen en uno.
+ *
+ * Un nombre de una sola palabra se devuelve el mismo: hay futbolistas que se
+ * llaman asi y tienen el mismo derecho a casar.
+ */
+function surnameTokens(normalized: string): string[] {
+  const tokens = normalized.split(' ').filter(Boolean)
+  return tokens.length <= 1 ? tokens : tokens.slice(1)
+}
+
+/** Las palabras de un nombre, ordenadas, para comparar sin importar el orden. */
+function tokenKey(normalized: string): string {
+  return normalized.split(' ').filter(Boolean).sort().join(' ')
 }
 
 /** Primera letra del nombre de pila. `''` si el nombre viene vacio. */
@@ -132,13 +157,22 @@ function splitAbbreviated(normalized: string): { initial: string; surname: strin
  *
  * Escalera, y para en el primer escalon que da un candidato UNICO:
  *   1. igualdad exacta normalizada;
- *   2. inicial + apellido (la forma en que abrevia la API);
+ *   2. inicial + un apellido COMPARTIDO (la forma en que abrevia la API);
  *   3. solo apellido, si en toda la plantilla lo lleva una unica persona;
  *   4. una sola palabra contra el NOMBRE DE PILA, si es unico en la plantilla.
- *      Este ultimo escalon existe por los brasilenos: la API escribe "Vinicius"
- *      y la plantilla dice "Vinicius Junior". Es seguro porque exige unicidad:
+ *      Este escalon existe por los brasilenos: la API escribe "Vinicius" y la
+ *      plantilla dice "Vinicius Junior". Es seguro porque exige unicidad:
  *      "Marc" en el Barcelona da dos candidatos (Casado y Bernal) y se queda sin
  *      resolver, que es lo correcto.
+ *   5. las mismas palabras en otro orden ("Cruz Luismi" / "Luismi Cruz");
+ *   6. abreviado contra un jugador de una sola palabra ("I. Romero" / "Isaac");
+ *   7. apodo recortado ("Chupe" / "Chupete").
+ *
+ * Los escalones 5, 6 y 7 se anadieron el 25/08/2026 despues de encontrar OCHO
+ * nombres guardados en crudo en cinco partidos ya jugados. Un nombre sin resolver
+ * no casa con NINGUN pronostico -- los pronosticos se eligen de la plantilla --,
+ * asi que un gol que existio no se lo cuenta a nadie y no salta ningun aviso:
+ * Foguell puso "Isaac", Isaac Romero marco en el 57' y cobro cero.
  *
  * Dos candidatos es AMBIGUO y se queda el nombre crudo. Dos "Garcia" en la misma
  * plantilla no son un caso raro, son un martes cualquiera.
@@ -166,10 +200,17 @@ export function resolvePlayerName(raw: string, squad: string[]): NameResolution 
   // 2. Inicial + apellido.
   const abbreviated = splitAbbreviated(norm)
   if (abbreviated) {
+    // Basta con que compartan UN apellido, no con que el sufijo entero coincida.
+    // Los dos lados abrevian a su manera y no por el mismo sitio:
+    //   API "A. Paredes"        plantilla "Aitor Paredes Casamichana"
+    //   API "R. Fernandez Jaen" plantilla "Roberto Fernández"
+    // La inicial sigue siendo obligatoria, y dos candidatos siguen siendo
+    // ambiguo, que es lo que impide que esto se vuelva un coladero.
+    const apellidosApi = abbreviated.surname.split(' ').filter(Boolean)
     const hits = entries.filter(
       (entry) =>
         firstInitial(entry.norm) === abbreviated.initial &&
-        surnameVariants(entry.norm).includes(abbreviated.surname),
+        surnameTokens(entry.norm).some((token) => apellidosApi.includes(token)),
     )
     if (hits.length === 1) {
       return { input, resolved: hits[0].name, matched: true, reason: 'initial-surname' }
@@ -216,6 +257,60 @@ export function resolvePlayerName(raw: string, squad: string[]): NameResolution 
         matched: false,
         reason: 'ambiguous',
         candidates: byGivenName.map((h) => h.name),
+      }
+    }
+  }
+
+  // 5. Las MISMAS palabras en otro orden.
+  //    API "Cruz Luismi" contra plantilla "Luismi Cruz". Aqui no hay nada que
+  //    adivinar: son exactamente los mismos apellidos y el unico que puede ser.
+  const porPalabras = entries.filter((entry) => tokenKey(entry.norm) === tokenKey(norm))
+  if (porPalabras.length === 1) {
+    return { input, resolved: porPalabras[0].name, matched: true, reason: 'mismas-palabras' }
+  }
+
+  // 6. Abreviado contra un jugador de UNA SOLA PALABRA.
+  //    API "I. Romero" contra plantilla "Isaac". La plantilla de football-data
+  //    trae a algunos con el apodo pelado y ahi no hay apellido con el que
+  //    comparar, asi que solo queda la inicial. Se exige que sea el UNICO de una
+  //    palabra con esa inicial en toda la plantilla; si hay dos, ambiguo.
+  if (abbreviated) {
+    const unaPalabra = entries.filter(
+      (entry) => !entry.norm.includes(' ') && firstInitial(entry.norm) === abbreviated.initial,
+    )
+    if (unaPalabra.length === 1) {
+      return { input, resolved: unaPalabra[0].name, matched: true, reason: 'una-palabra' }
+    }
+    if (unaPalabra.length > 1) {
+      return {
+        input,
+        resolved: input,
+        matched: false,
+        reason: 'ambiguous',
+        candidates: unaPalabra.map((h) => h.name),
+      }
+    }
+  }
+
+  // 7. Apodo recortado. API "Chupe" contra plantilla "Chupete".
+  //    Los dos de una sola palabra y uno prefijo del otro. Cuatro letras minimo:
+  //    con menos, "Juan" contra "Juanma" empezaria a casar cosas por casualidad.
+  if (!abbreviated && !norm.includes(' ') && norm.length >= 4) {
+    const porPrefijo = entries.filter(
+      (entry) =>
+        !entry.norm.includes(' ') &&
+        (entry.norm.startsWith(norm) || norm.startsWith(entry.norm)),
+    )
+    if (porPrefijo.length === 1) {
+      return { input, resolved: porPrefijo[0].name, matched: true, reason: 'prefijo' }
+    }
+    if (porPrefijo.length > 1) {
+      return {
+        input,
+        resolved: input,
+        matched: false,
+        reason: 'ambiguous',
+        candidates: porPrefijo.map((h) => h.name),
       }
     }
   }
