@@ -977,9 +977,25 @@ export async function syncMatchEvents(options: EventsSyncOptions = {}): Promise<
       const unmatched: string[] = []
       const scorers: string[] = []
       const assists: string[] = []
-      const seenScorer = new Set<string>()
-      const seenAssist = new Set<string>()
 
+      // UNA ENTRADA POR GOL, CON REPETICIONES. Quien marca dos veces sale dos
+      // veces, y quien da dos asistencias tambien.
+      //
+      // Aqui habia un deduplicado por nombre normalizado, con un comentario que
+      // decia "igual que `calc_points`". Eso era cierto hasta la migracion 0022,
+      // que cambio el recuento a `least(veces_puestas, veces_reales)` para que se
+      // pudiera pronosticar un doblete. Desde entonces las dos partes decian cosas
+      // distintas: quien acertaba un doblete cobraba UN acierto, porque en
+      // `real_scorers` el goleador figuraba una sola vez.
+      //
+      // Se llevo por delante dos partidos reales:
+      //   ESP-LEV (3-0): R. Fernandez Jaen marco en el 5' y en el 40' -> 2 nombres
+      //   ELC-BAR (0-5): Raphinha 14'p y 67', Fermin 71' y 79'    -> 3 nombres
+      //
+      // Los duplicados de verdad del feed (el evento 'Penalty' que repite un
+      // 'Goal') ya los corta `goalKey` en `extractGoals`, que compara equipo,
+      // MINUTO y jugador. Ese es el sitio donde se distingue un gol repetido de un
+      // doblete; aqui no habia forma de distinguirlos y por eso se perdian.
       for (const goal of extraction.goals) {
         const squad = squadFor(goal.team)
 
@@ -987,25 +1003,14 @@ export async function syncMatchEvents(options: EventsSyncOptions = {}): Promise<
         namesTotal += 1
         if (scorer.matched) namesMatched += 1
         else unmatched.push(scorer.input)
-        // Se deduplica por forma normalizada, igual que `calc_points`: dos
-        // grafias del mismo jugador son un solo goleador para la puntuacion, y
-        // tenerlas las dos en la lista no cambia nada salvo confundir al leerla.
-        const scorerKey = normalizePlayer(scorer.resolved)
-        if (scorerKey !== '' && !seenScorer.has(scorerKey)) {
-          seenScorer.add(scorerKey)
-          scorers.push(scorer.resolved)
-        }
+        if (normalizePlayer(scorer.resolved) !== '') scorers.push(scorer.resolved)
 
         if (goal.assist) {
           const assist = resolvePlayerName(goal.assist, squad)
           namesTotal += 1
           if (assist.matched) namesMatched += 1
           else unmatched.push(assist.input)
-          const assistKey = normalizePlayer(assist.resolved)
-          if (assistKey !== '' && !seenAssist.has(assistKey)) {
-            seenAssist.add(assistKey)
-            assists.push(assist.resolved)
-          }
+          if (normalizePlayer(assist.resolved) !== '') assists.push(assist.resolved)
         }
       }
 
