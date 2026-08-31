@@ -33,6 +33,15 @@ export type AccessRowVM = {
   predictions: number
   /** El organizador no se puede quitar: la peña se quedaria sin nadie al mando. */
   isAdmin: boolean
+  /**
+   * Su codigo personal de acceso, o `null` si todavia no tiene.
+   *
+   * Se lee con la service role key a traves de `codigos_de_la_pena()`, porque la
+   * tabla vive en el esquema `private` y PostgREST no lo expone. Solo sale de
+   * aqui, que empieza por `requireAdmin()`: este campo es la contraseña de esa
+   * persona y no puede acabar en la pantalla de nadie mas.
+   */
+  accessCode: string | null
 }
 
 export async function getAccessRows(): Promise<AccessRowVM[]> {
@@ -51,15 +60,22 @@ export async function getAccessRows(): Promise<AccessRowVM[]> {
   const { data, error } = await admin.auth.admin.listUsers({ page: 1, perPage: 200 })
   if (error) return []
 
-  const [{ data: members }, { data: leagues }, { data: predictions }] = await Promise.all([
-    admin.from('members').select('id, user_id, display_name'),
-    admin.from('leagues').select('admin_user_id'),
-    admin.from('predictions').select('member_id'),
-  ])
+  const [{ data: members }, { data: leagues }, { data: predictions }, { data: codes }] =
+    await Promise.all([
+      admin.from('members').select('id, user_id, display_name'),
+      admin.from('leagues').select('admin_user_id'),
+      admin.from('predictions').select('member_id'),
+      admin.rpc('codigos_de_la_pena'),
+    ])
 
   type MemberRow = { id: string; user_id: string; display_name: string }
   const memberByUser = new Map<string, MemberRow>()
   for (const row of (members ?? []) as MemberRow[]) memberByUser.set(row.user_id, row)
+
+  const codeByMember = new Map<string, string>()
+  for (const row of (codes ?? []) as Array<{ member_id: string; code: string }>) {
+    codeByMember.set(row.member_id, row.code)
+  }
 
   const admins = new Set(
     ((leagues ?? []) as Array<{ admin_user_id: string }>).map((row) => row.admin_user_id),
@@ -81,6 +97,7 @@ export async function getAccessRows(): Promise<AccessRowVM[]> {
         memberId: member?.id ?? null,
         predictions: member ? (predictionsByMember.get(member.id) ?? 0) : 0,
         isAdmin: admins.has(user.id),
+        accessCode: member ? (codeByMember.get(member.id) ?? null) : null,
       }
     })
     // Primero quien nunca ha entrado y quien no tiene ficha: son justo los que

@@ -77,12 +77,35 @@ export async function updateSession(request: NextRequest) {
   // ATENCION: NO ESCRIBAS NINGUNA SENTENCIA ENTRE `createServerClient` Y
   // `getClaims()`. Cualquier cosa en medio provoca deslogueos aleatorios
   // imposibles de depurar. Y es `getClaims()`, jamas `getSession()`.
-  const { data } = await supabase.auth.getClaims()
+  const { data, error } = await supabase.auth.getClaims()
 
   const hasSession = Boolean(data?.claims)
   const { pathname } = request.nextUrl
 
-  if (!hasSession && !isPublicPath(pathname)) {
+  /**
+   * NO ES LO MISMO "no hay sesion" QUE "no he podido comprobarlo".
+   *
+   * `getClaims()` devuelve `{ data: null }` ante CUALQUIER fallo, incluido que
+   * GoTrue conteste 429 o 5xx o que se caiga la red un segundo. Antes eso
+   * mandaba a /login a alguien con la cookie perfectamente sana, y para quien lo
+   * sufre eso es exactamente "me ha echado la app".
+   *
+   * Al revisar `auth.sessions` el 31/08/2026 salio que SEIS de las doce veces
+   * que alguien tuvo que volver a entrar, su sesion anterior seguia viva y
+   * rotando tokens. La cookie estaba bien; el que fallo fue el chequeo.
+   *
+   * Asi que un fallo con cookie de sesion presente se DEJA PASAR. No abre
+   * ninguna puerta: la autorizacion de verdad es RLS mas `requireMember()` al
+   * principio de cada pagina protegida (D13), y esta capa solo refresca y
+   * redirige. Lo peor que puede pasar es que la pagina falle por su cuenta con
+   * un mensaje que se entiende, en vez de tirar la sesion a la basura.
+   */
+  const traeCookieDeSesion = request.cookies
+    .getAll()
+    .some((c) => c.name.includes('-auth-token'))
+  const noSeHaPodidoComprobar = !hasSession && Boolean(error) && traeCookieDeSesion
+
+  if (!hasSession && !noSeHaPodidoComprobar && !isPublicPath(pathname)) {
     const loginUrl = request.nextUrl.clone()
     loginUrl.pathname = '/login'
     loginUrl.search = ''

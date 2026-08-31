@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
 
+import { enterWithCodeAction } from './code-actions'
 import { LoginForm } from './login-form'
 
 export const metadata: Metadata = {
@@ -15,7 +16,15 @@ export const metadata: Metadata = {
  */
 const BACKDROP = 'radial-gradient(120% 60% at 50% 0%, var(--accent-soft) 0%, transparent 62%), var(--bg)'
 
-export default async function LoginPage() {
+export default async function LoginPage({
+  searchParams,
+}: {
+  // En Next 16 `searchParams` es una promesa (D5).
+  searchParams: Promise<Record<string, string | string[] | undefined>>
+}) {
+  const { error } = await searchParams
+  const codigoMal = error === 'codigo'
+
   return (
     <main
       // 96/26/40 del prototipo, con `max()` para que en un iPhone con notch el
@@ -40,6 +49,47 @@ export default async function LoginPage() {
         </p>
 
         <LoginForm />
+
+        {/* Servidor puro y sin `useActionState`, igual que /auth/confirm: asi el
+            POST sale aunque el JavaScript no haya cargado. Es justo la pantalla
+            donde eso importa, porque quien llega aqui es alguien a quien la app
+            acaba de dejar fuera. */}
+        <div className="mt-[26px] border-t border-line pt-[22px]">
+          <p className="mb-[10px] text-[13px] font-bold text-txt2">¿Tienes tu código personal?</p>
+          <form action={enterWithCodeAction} className="flex flex-col gap-[10px]">
+            <input
+              name="code"
+              type="text"
+              inputMode="text"
+              autoComplete="one-time-code"
+              autoCapitalize="characters"
+              autoCorrect="off"
+              spellCheck={false}
+              placeholder="ABCD-2K9P"
+              aria-label="Tu código personal"
+              aria-invalid={codigoMal || undefined}
+              required
+              className="min-h-[52px] w-full rounded-[14px] border border-line2 bg-card px-[15px] text-center font-num text-[19px] font-extrabold uppercase tracking-[.22em] text-txt placeholder:tracking-[.12em] placeholder:text-txt3 focus:border-accent focus:outline-none"
+            />
+            <button
+              type="submit"
+              className="flex min-h-[52px] w-full items-center justify-center rounded-[16px] border border-line2 bg-card px-[20px] text-[15px] font-extrabold text-txt transition-transform duration-100 active:scale-[.97] active:opacity-90"
+            >
+              Entrar con mi código
+            </button>
+          </form>
+
+          {codigoMal && (
+            <p className="mt-[10px] text-[12.5px] font-semibold leading-[1.45] text-bad">
+              Ese código no vale. Míralo otra vez: son 8 caracteres y no llevan ni la letra O ni la
+              I. Si lo has perdido, pídele otro a Raúl.
+            </p>
+          )}
+
+          <p className="mt-[10px] text-[11.5px] font-semibold leading-[1.45] text-txt3">
+            No caduca y sirve siempre. Guárdatelo donde no se te pierda.
+          </p>
+        </div>
       </div>
 
       <div className="flex items-center justify-center gap-[6px] text-[12.5px] text-txt3">

@@ -1,15 +1,18 @@
 'use client'
 
-import { AlertTriangle, Check, Copy, Link2, UserMinus } from 'lucide-react'
+import { AlertTriangle, Check, Copy, KeyRound, Link2, UserMinus } from 'lucide-react'
 import { useActionState, useEffect, useState } from 'react'
 
 import { Button, Chip, TextInput, useToast } from '@/components/ui'
+import { formatAccessCode } from '@/lib/access-code'
 import { cn } from '@/lib/cn'
 import type { AccessRowVM } from '@/lib/data/access'
 
 import {
   createInviteLinkAction,
+  regenerateCodeAction,
   removeMemberAction,
+  type CodeState,
   type InviteState,
   type RemoveState,
 } from './access-actions'
@@ -19,6 +22,9 @@ const NO_INVITE: InviteState = { ok: false, error: null, link: null, email: null
 
 /** Estado inicial del borrado. Aqui por lo mismo: de un 'use server' solo salen funciones. */
 const NO_REMOVE: RemoveState = { ok: false, error: null, removed: null }
+
+/** Y el del codigo. Misma razon. */
+const NO_CODE: CodeState = { ok: false, error: null, code: null, name: null }
 
 export interface AdminAccessFormProps {
   rows: AccessRowVM[]
@@ -100,6 +106,22 @@ export function AdminAccessForm({ rows }: AdminAccessFormProps) {
     else if (removeState.error) showToast(removeState.error, 'bad')
   }, [removeState, showToast])
 
+  const [codeState, codeAction, generando] = useActionState(regenerateCodeAction, NO_CODE)
+  useEffect(() => {
+    if (codeState.ok && codeState.code) showToast(`Código nuevo para ${codeState.name}.`)
+    else if (codeState.error) showToast(codeState.error, 'bad')
+  }, [codeState, showToast])
+
+  async function copiarCodigo(code: string, quien: string) {
+    try {
+      await navigator.clipboard.writeText(code)
+      showToast(`Código de ${quien} copiado.`)
+    } catch {
+      showToast('No hemos podido copiar. Selecciónalo a mano.', 'bad')
+    }
+  }
+
+  const sinCodigo = rows.filter((row) => row.memberId !== null && row.accessCode === null)
   const pendientes = rows.filter((row) => row.lastSignInAt === null || row.displayName === null)
 
   return (
@@ -166,6 +188,62 @@ export function AdminAccessForm({ rows }: AdminAccessFormProps) {
           </p>
         </div>
       )}
+
+      {/* Los codigos personales. Van ANTES de la lista de entradas porque son lo
+          que de verdad resuelve el problema: con su codigo, cada uno vuelve a
+          entrar solo y no hay que emitirle nada. */}
+      <div className="rounded-[17px] border border-line bg-card px-[14px] py-[13px]">
+        <div className="mb-[6px] flex items-center gap-[8px]">
+          <KeyRound size={15} strokeWidth={2.3} aria-hidden className="flex-none text-accent2" />
+          <span className="text-[13px] font-extrabold">Códigos personales</span>
+          {sinCodigo.length > 0 && <Chip tone="warn">{sinCodigo.length} sin código</Chip>}
+        </div>
+        <p className="mb-[12px] text-[11.5px] font-semibold leading-[1.45] text-txt3">
+          Cada uno entra con el suyo desde la pantalla de acceso, sin pedirte nada. No caduca. Si
+          alguien lo pega donde no debe, dale a rehacer y el viejo deja de valer al instante.
+        </p>
+
+        <ul className="flex flex-col gap-[10px]">
+          {rows
+            .filter((row) => row.memberId !== null)
+            .map((row) => (
+              <li key={row.memberId} className="flex items-center gap-[9px]">
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[13px] font-bold text-txt">
+                    {row.displayName ?? row.email}
+                  </span>
+                  <span className="block font-num text-[15px] font-extrabold tracking-[.16em] text-accent2">
+                    {row.accessCode ? formatAccessCode(row.accessCode) : '— sin código —'}
+                  </span>
+                </span>
+
+                {row.accessCode && (
+                  <button
+                    type="button"
+                    onClick={() => copiarCodigo(row.accessCode as string, row.displayName ?? row.email)}
+                    aria-label={`Copiar el código de ${row.displayName ?? row.email}`}
+                    className="flex size-[34px] flex-none items-center justify-center rounded-[10px] border border-line text-txt3 transition-transform duration-100 active:scale-[.94]"
+                  >
+                    <Copy size={15} strokeWidth={2.3} aria-hidden />
+                  </button>
+                )}
+
+                <form action={codeAction} className="flex-none">
+                  <input type="hidden" name="memberId" value={row.memberId ?? ''} readOnly />
+                  <input
+                    type="hidden"
+                    name="name"
+                    value={row.displayName ?? row.email}
+                    readOnly
+                  />
+                  <Button type="submit" variant="secondary" size="sm" loading={generando}>
+                    {row.accessCode ? 'Rehacer' : 'Dar código'}
+                  </Button>
+                </form>
+              </li>
+            ))}
+        </ul>
+      </div>
 
       <div className="rounded-[17px] border border-line bg-card px-[14px] py-[13px]">
         <div className="mb-[11px] flex items-center gap-[8px]">

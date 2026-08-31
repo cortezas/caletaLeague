@@ -3,6 +3,7 @@
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { revalidatePath } from 'next/cache'
 
+import { generateAccessCode } from '@/lib/access-code'
 import { requireAdmin } from '@/lib/auth'
 import { createClient, isSupabaseConfigured } from '@/lib/supabase/server'
 
@@ -184,4 +185,89 @@ export async function removeMemberAction(
   revalidatePath('/clasificacion')
   revalidatePath('/jornada')
   return { ok: true, error: null, removed: name || 'Miembro' }
+}
+
+export type CodeState = {
+  ok: boolean
+  error: string | null
+  /** El codigo recien puesto y de quien es, para poder enseñarlo al momento. */
+  code: string | null
+  name: string | null
+}
+
+/**
+ * Da (o rehace) el codigo personal de alguien.
+ *
+ * El codigo ES la contraseña de Supabase de esa persona: se guarda con
+ * `admin.updateUserById` y se canjea en /login con `signInWithPassword`. Por eso
+ * este paso hace DOS escrituras y el orden importa: primero la contraseña y
+ * despues la tabla. Al reves, un fallo a mitad dejaria en la tabla un codigo que
+ * no abre nada, y la persona estaria fuera creyendo que tiene la llave buena.
+ *
+ * Rehacerlo INVALIDA el anterior al instante, que es justo lo que hace falta
+ * cuando alguien pega su codigo en el grupo equivocado.
+ */
+export async function regenerateCodeAction(
+  _prev: CodeState,
+  formData: FormData,
+): Promise<CodeState> {
+  try {
+    await requireAdmin()
+  } catch {
+    return { ok: false, error: DENIED, code: null, name: null }
+  }
+  if (!isSupabaseConfigured) {
+    return { ok: false, error: 'Supabase no esta configurado.', code: null, name: null }
+  }
+
+  const memberId = String(formData.get('memberId') ?? '').trim()
+  const name = String(formData.get('name') ?? '').trim() || 'esa persona'
+  if (memberId === '') {
+    return { ok: false, error: 'Falta a quien.', code: null, name: null }
+  }
+
+  let db
+  try {
+    db = admin()
+  } catch {
+    return { ok: false, error: 'Falta la service role key.', code: null, name: null }
+  }
+
+  const { data: member, error: memberError } = await db
+    .from('members')
+    .select('id, user_id')
+    .eq('id', memberId)
+    .maybeSingle()
+  if (memberError || !member) {
+    return { ok: false, error: 'No encuentro a esa persona.', code: null, name: null }
+  }
+
+  const code = generateAccessCode()
+
+  const { error: passError } = await db.auth.admin.updateUserById(
+    (member as { user_id: string }).user_id,
+    { password: code },
+  )
+  if (passError) {
+    return { ok: false, error: `No se pudo guardar: ${passError.message}`, code: null, name: null }
+  }
+
+  const { error: saveError } = await db.rpc('guardar_codigo', {
+    p_member_id: memberId,
+    p_code: code,
+  })
+  if (saveError) {
+    // La contraseña ya cambio pero la tabla no: el codigo funciona y no sabemos
+    // de quien es, o sea que nadie podra entrar con el. Se dice tal cual en vez
+    // de fingir que no paso nada.
+    return {
+      ok: false,
+      error: `Se cambio la contraseña pero no se guardo el codigo (${saveError.message}). Vuelve a darle.`,
+      code: null,
+      name: null,
+    }
+  }
+
+  revalidatePath('/ajustes/admin')
+  return { ok: true, error: null, code, name }
 }
