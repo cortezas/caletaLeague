@@ -81,6 +81,7 @@ export interface NameResolution {
     | 'mismas-palabras'
     | 'una-palabra'
     | 'prefijo'
+    | 'contenido'
     | 'ambiguous'
     | 'no-squad'
     | 'no-match'
@@ -166,7 +167,8 @@ function splitAbbreviated(normalized: string): { initial: string; surname: strin
  *      resolver, que es lo correcto.
  *   5. las mismas palabras en otro orden ("Cruz Luismi" / "Luismi Cruz");
  *   6. abreviado contra un jugador de una sola palabra ("I. Romero" / "Isaac");
- *   7. apodo recortado ("Chupe" / "Chupete").
+ *   7. apodo recortado ("Chupe" / "Chupete");
+ *   8. un nombre contenido en el otro ("Marc Bartra" / "Bartra").
  *
  * Los escalones 5, 6 y 7 se anadieron el 25/08/2026 despues de encontrar OCHO
  * nombres guardados en crudo en cinco partidos ya jugados. Un nombre sin resolver
@@ -312,6 +314,40 @@ export function resolvePlayerName(raw: string, squad: string[]): NameResolution 
         reason: 'ambiguous',
         candidates: porPrefijo.map((h) => h.name),
       }
+    }
+  }
+
+  // 8. Un nombre CONTENIDO en el otro.
+  //    "Marc Bartra" / "Bartra", "Roberto Fernández Jaén" / "Roberto Fernández",
+  //    "Francisco Javier Hernandez Coarasa" / "Javier Hernández",
+  //    "I. Ruiz de Galarreta" / "Ruiz de Galarreta".
+  //
+  //    Esto no es un capricho del feed: football-data CAMBIA la grafia de sus
+  //    propias plantillas. El 31/08/2026 refresco las 17 de golpe a las 03:20 y
+  //    acorto media docena de nombres, tres horas despues de ingerir la jornada.
+  //    Los resultados se habian guardado con la forma larga y los pronosticos
+  //    llevaban la corta, asi que 16 aciertos de nueve personas se quedaron en
+  //    cero sin que nada fallara a la vista.
+  //
+  //    Se exige candidato UNICO, como todos los demas escalones.
+  const palabras = new Set(norm.split(' ').filter(Boolean))
+  const contenido = entries.filter((entry) => {
+    const suyas = entry.norm.split(' ').filter(Boolean)
+    if (suyas.length === 0) return false
+    const dentro = suyas.every((t) => palabras.has(t))
+    const alReves = [...palabras].every((t) => suyas.includes(t))
+    return dentro || alReves
+  })
+  if (contenido.length === 1) {
+    return { input, resolved: contenido[0].name, matched: true, reason: 'contenido' }
+  }
+  if (contenido.length > 1) {
+    return {
+      input,
+      resolved: input,
+      matched: false,
+      reason: 'ambiguous',
+      candidates: contenido.map((h) => h.name),
     }
   }
 
