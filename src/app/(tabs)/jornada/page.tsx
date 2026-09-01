@@ -6,6 +6,7 @@ import { notFound } from 'next/navigation'
 import { EmptyState, ProgressBar } from '@/components/ui'
 import { GameweekHeader, SecretBanner } from '@/features/jornada/gameweek-header'
 import { MatchRow } from '@/features/jornada/match-row'
+import { PushNudge } from '@/features/jornada/push-nudge'
 import { LineupWarmer } from '@/features/lineups/lineup-warmer'
 import { requireMember } from '@/lib/auth'
 import { getActiveGameweek, getGameweek } from '@/lib/data'
@@ -87,7 +88,13 @@ export default async function JornadaPage({
 
       <GameweekHeader gameweek={gameweek} />
 
-      <div className="px-[14px] pt-[14px] pb-[26px] lg:grid lg:grid-cols-[minmax(0,1fr)_284px] lg:items-start lg:gap-[20px] lg:px-[24px] lg:pt-[22px]">
+      {/* Debajo de la cabecera y encima de los partidos: es lo primero que se ve
+          al abrir, que es donde tiene sentido un empujon que se puede cerrar. */}
+      <div className="pt-[14px]">
+        <PushNudge />
+      </div>
+
+      <div className="px-[14px] pb-[26px] lg:grid lg:grid-cols-[minmax(0,1fr)_284px] lg:items-start lg:gap-[20px] lg:px-[24px] lg:pt-[22px]">
         <div className="flex min-w-0 flex-col gap-[9px]">
           <SecretBanner className="lg:hidden" />
 

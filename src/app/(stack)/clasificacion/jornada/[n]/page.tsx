@@ -5,6 +5,7 @@ import { notFound } from 'next/navigation'
 
 import { ScreenHeader } from '@/components/ui'
 import { GameweekAccordion } from '@/features/standings/gameweek-accordion'
+import { ShareGameweek } from '@/features/standings/share-gameweek'
 import { requireMember } from '@/lib/auth'
 import { getGameweekStandings } from '@/lib/data'
 
@@ -87,6 +88,7 @@ export default async function ClasificacionJornadaPage({
         </nav>
 
         <GameweekAccordion rows={standings.rows} />
+        <ShareGameweek standings={standings} />
       </div>
     </>
   )
