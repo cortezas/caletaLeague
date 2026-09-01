@@ -20,6 +20,12 @@ export type MatchRowVM = {
   // La interfaz TIENE que distinguirlo: una hora inventada presentada como
   // buena hace que alguien se pierda el cierre de su pronostico.
   kickoffProvisional: boolean
+  /**
+   * Partido estrella: 2 = vale doble. Tiene que verse en la tarjeta y en el
+   * editor: un partido que vale doble y no se anuncia no cambia la estrategia
+   * de nadie, que es justo para lo que existe.
+   */
+  multiplier: number
   status: MatchStatus        // 'open' | 'locked' | 'live' | 'played'
   myPrediction: Prediction | null
   result: MatchResult | null
@@ -246,6 +252,8 @@ export type AdminMatchVM = {
   result: MatchResult | null
   missingMvp: boolean
   players: string[]
+  /** Partido estrella: 2 = vale doble. Uno por jornada como mucho. */
+  multiplier: number
   /** ISO en UTC. Lo que el organizador edita en la pestaña Horarios. */
   kickoffAt: string
   /**
@@ -274,6 +282,8 @@ export type AdminMatchVM = {
  * antes. `pendingCount` son los partidos de ESTA jornada sin MVP o sin resultado.
  */
 export type AdminGameweekVM = {
+  /** Hace falta para elegir el partido estrella: la accion escribe por jornada. */
+  id: string
   number: number
   matches: AdminMatchVM[]
   hasPrev: boolean; hasNext: boolean; prevNumber: number | null; nextNumber: number | null

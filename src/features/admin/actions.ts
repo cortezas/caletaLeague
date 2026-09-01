@@ -479,3 +479,72 @@ function kickoffWriteError(error: { code?: string }): string {
   if (error.code === '42501') return DENIED
   return 'No hemos podido guardar los horarios.'
 }
+
+/**
+ * Elige el partido estrella de la jornada: el que vale doble.
+ *
+ * Es UNO por jornada y lo impone un indice unico parcial en la base
+ * (`matches_una_estrella_por_jornada`, migracion 0034), no un acuerdo de
+ * palabra. Por eso aqui se apaga primero toda la jornada y se enciende despues:
+ * en dos sentencias dentro de la misma peticion, sin ventana donde queden dos.
+ *
+ * Se puede quitar mandando el mismo partido que ya lo era, o uno vacio.
+ *
+ * NO se deja tocar una jornada que ya ha empezado. Doblar los puntos de un
+ * partido cuando la gente ya ha pronosticado sabiendo que valia lo normal es
+ * cambiar las reglas a mitad de mano.
+ */
+export async function setStarMatchAction(
+  _prev: SaveState,
+  formData: FormData,
+): Promise<SaveState> {
+  try {
+    await requireAdmin()
+  } catch {
+    return { ok: false, error: 'No tienes permiso para esto.' }
+  }
+  if (!isSupabaseConfigured) return { ok: false, error: 'Supabase no esta configurado.' }
+
+  const gameweekId = String(formData.get('gameweekId') ?? '').trim()
+  const matchId = String(formData.get('matchId') ?? '').trim()
+  if (gameweekId === '') return { ok: false, error: 'Falta la jornada.' }
+
+  const supabase = await createClient()
+
+  const { data: empezados, error: readError } = await supabase
+    .from('matches')
+    .select('id, kickoff_at')
+    .eq('gameweek_id', gameweekId)
+  if (readError) return { ok: false, error: readError.message }
+
+  const yaEmpezada = (empezados ?? []).some(
+    (row) => new Date((row as { kickoff_at: string }).kickoff_at).getTime() <= Date.now(),
+  )
+  if (yaEmpezada) {
+    return {
+      ok: false,
+      error: 'Esta jornada ya ha empezado. El partido estrella se elige antes del primer pitido.',
+    }
+  }
+
+  const { error: offError } = await supabase
+    .from('matches')
+    .update({ multiplicador: 1 })
+    .eq('gameweek_id', gameweekId)
+    .neq('multiplicador', 1)
+  if (offError) return { ok: false, error: offError.message }
+
+  if (matchId !== '') {
+    const { error: onError } = await supabase
+      .from('matches')
+      .update({ multiplicador: 2 })
+      .eq('id', matchId)
+      .eq('gameweek_id', gameweekId)
+    if (onError) return { ok: false, error: onError.message }
+  }
+
+  revalidatePath('/ajustes/admin')
+  revalidatePath('/jornada')
+  revalidatePath('/clasificacion')
+  return { ok: true, error: null }
+}

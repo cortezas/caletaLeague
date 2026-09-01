@@ -287,6 +287,16 @@ export function MatchRow({ match }: MatchRowProps) {
         <span className="min-w-0 truncate text-[11.5px] font-semibold text-txt3 lg:text-[11px]">
           {match.kickoffLabel}
         </span>
+        {/* El partido estrella tiene que CANTAR. Uno que vale doble y no se
+            anuncia no cambia la estrategia de nadie, que es para lo que existe. */}
+        {match.multiplier > 1 && (
+          <span
+            title={`Partido estrella: los puntos de este partido valen x${match.multiplier}`}
+            className="flex-none rounded-[6px] bg-accent px-[6px] py-[2px] font-num text-[9.5px] font-extrabold uppercase leading-[1.4] tracking-[.08em] text-accent-ink"
+          >
+            x{match.multiplier}
+          </span>
+        )}
         {/* Sin esto, una hora provisional se lee como si fuera la definitiva y
             alguien se puede perder el cierre de su pronostico. */}
         {match.kickoffProvisional && (

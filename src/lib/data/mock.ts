@@ -230,6 +230,7 @@ function matchRowVM(match: Match, myPrediction: Prediction | null, scoring: Scor
     // El mock deriva el estado del reloj y nunca produce 'locked' ni marcadores
     // a medias: en seco no hay partido en juego que enseñar.
     liveScore: null,
+    multiplier: 1,
     home: teamVM(match.home),
     away: teamVM(match.away),
     kickoffAt: match.kickoffAt,
@@ -751,6 +752,9 @@ export async function mockGetAdminMatches(): Promise<AdminMatchVM[]> {
       status: match.status,
       result,
       missingMvp: match.status === 'played' && !result?.mvp,
+      // Sin base de datos no hay partido estrella que elegir: en seco todos
+      // valen lo mismo.
+      multiplier: 1,
       players: [...squadOf(match.home), ...squadOf(match.away)],
       kickoffAt: match.kickoffAt,
       apiKickoffAt: null,

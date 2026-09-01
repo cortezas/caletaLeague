@@ -119,6 +119,15 @@ export function scoreMatch(
 export interface GameweekEntry {
   prediction: Prediction | null
   result: MatchResult | null
+  /**
+   * Partido estrella: 2 = vale doble. Sin poner, 1.
+   *
+   * Multiplica los puntos DEL PARTIDO, no el pleno. El pleno es plano y depende
+   * solo de acertar los 10 signos; doblarlo seria otra regla. Y no entra dentro
+   * de `scoreMatch` a proposito: ahi vive la puntuacion de un pronostico, que es
+   * la misma en todos los partidos. Lo que cambia es cuanto vale ese partido.
+   */
+  multiplier?: number
 }
 
 export interface GameweekBreakdown {
@@ -137,7 +146,10 @@ export function scoreGameweek(entries: GameweekEntry[], scoring: Scoring): Gamew
     prediction && result ? scoreMatch(prediction, result, scoring) : null,
   )
 
-  const base = perMatch.reduce((sum, m) => sum + (m?.points ?? 0), 0)
+  const base = perMatch.reduce(
+    (sum, m, i) => sum + (m?.points ?? 0) * (entries[i].multiplier ?? 1),
+    0,
+  )
 
   const allPlayed = perMatch.every((m) => m !== null)
   const allSigns = perMatch.every((m) => m?.signHit === true)

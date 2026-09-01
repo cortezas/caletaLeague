@@ -159,6 +159,7 @@ function matchRowVM(
     id: row.id,
     home: teamVM(row.home_code),
     away: teamVM(row.away_code),
+    multiplier: row.multiplicador ?? 1,
     kickoffAt: isoUtc(row.kickoff_at),
     kickoffLabel: formatKickoff(row.kickoff_at),
     kickoffProvisional: row.kickoff_provisional,

@@ -7,6 +7,7 @@ import { ScreenHeader } from '@/components/ui'
 import { AdminAccessForm } from '@/features/admin/admin-access-form'
 import { AdminMoneyForm } from '@/features/admin/admin-money-form'
 import { AdminKickoffForm } from '@/features/admin/admin-kickoff-form'
+import { AdminStarForm } from '@/features/admin/admin-star-form'
 import { AdminResultForm } from '@/features/admin/admin-result-form'
 import { AdminScoringForm } from '@/features/admin/admin-scoring-form'
 import { AdminSquadForm } from '@/features/admin/admin-squad-form'
@@ -247,7 +248,15 @@ export default async function AdminPage({
               memberCount={settings.memberCount}
             />
           ) : (
-            <AdminKickoffForm key={gameweek.number} matches={gameweek.matches} />
+            <div className="flex flex-col gap-[13px]">
+              <AdminStarForm
+                key={`estrella-${gameweek.number}`}
+                gameweekId={gameweek.id}
+                gameweekNumber={gameweek.number}
+                matches={gameweek.matches}
+              />
+              <AdminKickoffForm key={gameweek.number} matches={gameweek.matches} />
+            </div>
           )}
         </>
       )}

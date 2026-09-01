@@ -244,13 +244,16 @@ export type MatchRow = {
   /** 'admin' = la hora la fijo el organizador; la ingesta no la pisa (0016). */
   kickoff_source: string | null
   kickoff_api_at: string | null
+  /** Partido estrella: 2 = vale doble (migracion 0034). */
+  multiplicador: number | null
 }
 
 // `real_assists` va SIEMPRE en el select. Si falta, `resultOf` monta un
 // MatchResult sin `assists` y el primer `.map()` de la pantalla revienta.
 const MATCH_COLUMNS =
   'id, gameweek_id, home_code, away_code, kickoff_at, kickoff_provisional, ' +
-  'status, real_home, real_away, real_mvp, real_scorers, real_assists, position, kickoff_source, kickoff_api_at'
+  'status, real_home, real_away, real_mvp, real_scorers, real_assists, position, kickoff_source, ' +
+  'kickoff_api_at, multiplicador'
 
 export const getLeagueGameweeks = cache(async (): Promise<GameweekRow[]> => {
   const ctx = await getDataContext()
@@ -593,6 +596,7 @@ export async function getLeagueSettings(): Promise<LeagueSettingsVM> {
 
 /** Una peña sin calendario sembrado. El panel abre igual: hay dos pestañas mas. */
 const EMPTY_ADMIN_GAMEWEEK: AdminGameweekVM = {
+  id: '',
   number: 0,
   matches: [],
   hasPrev: false,
@@ -717,10 +721,12 @@ export async function getAdminMatches(n?: number): Promise<AdminGameweekVM | nul
       kickoffAt: row.kickoff_at,
       kickoffManual: row.kickoff_source === 'admin',
       apiKickoffAt: row.kickoff_api_at,
+      multiplier: row.multiplicador ?? 1,
     }
   })
 
   return {
+    id: gameweek.id,
     number: gameweek.number,
     matches,
     ...navOf(gameweeks, index),
@@ -743,6 +749,7 @@ async function mockAdminGameweek(n?: number): Promise<AdminGameweekVM | null> {
     label: `${row.home.name} – ${row.away.name}`,
     status: row.status,
     result: row.result,
+    multiplier: row.multiplier,
     missingMvp: row.status === 'played' && !row.result?.mvp,
     players: [],
     kickoffAt: row.kickoffAt,
@@ -752,6 +759,9 @@ async function mockAdminGameweek(n?: number): Promise<AdminGameweekVM | null> {
   }))
 
   return {
+    // En seco no hay id de jornada que valga; el formulario del partido estrella
+    // se apaga solo porque la accion pide uno.
+    id: '',
     number: gameweek.number,
     matches,
     hasPrev: gameweek.hasPrev,
