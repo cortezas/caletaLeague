@@ -68,7 +68,7 @@ export default async function PartidoPage({ params }: { params: Promise<{ matchI
 
         <ul className="flex flex-col gap-[6px]">
           {rows.map((row) => (
-            <PiqueRow key={row.memberId} row={row} />
+            <PiqueRow key={row.memberId} row={row} matchId={pique.match.id} />
           ))}
         </ul>
       </div>

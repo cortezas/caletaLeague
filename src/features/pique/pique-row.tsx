@@ -2,6 +2,8 @@ import { Check, Footprints, Target } from 'lucide-react'
 
 import { Avatar } from '@/components/ui'
 import { cn } from '@/lib/cn'
+
+import { ReactionBar } from './reaction-bar'
 import { scoreLabel } from '@/lib/format'
 import type { PiqueChipKind, PiqueVM } from '@/lib/view-models'
 
@@ -25,6 +27,8 @@ const CHIP_ICON: Record<PiqueChipKind, typeof Target | null> = {
 
 export interface PiqueRowProps {
   row: Row
+  /** Hace falta para reaccionar: la accion escribe por partido. */
+  matchId: string
 }
 
 /** Pildora del marcador: verde si clavo el resultado, ambar si solo el 1X2. */
@@ -41,7 +45,7 @@ function pointsTone(points: number): string {
 }
 
 /** Que puso cada uno de la pena en un partido ya jugado. */
-export function PiqueRow({ row }: PiqueRowProps) {
+export function PiqueRow({ row, matchId }: PiqueRowProps) {
   return (
     <li
       className={cn(
@@ -103,6 +107,15 @@ export function PiqueRow({ row }: PiqueRowProps) {
           )
         })}
       </div>
+
+      {/* El pique estaba entero en el WhatsApp. Aqui es donde estan los datos. */}
+      <ReactionBar
+        matchId={matchId}
+        targetId={row.memberId}
+        counts={row.reactions}
+        mine={row.myReactions}
+        isMe={row.isMe}
+      />
     </li>
   )
 }

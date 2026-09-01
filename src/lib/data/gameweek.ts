@@ -405,6 +405,24 @@ async function fetchSubstitutions(ctx: DataContext, matchId: string): Promise<Su
 }
 
 /**
+ * Las reacciones de un partido.
+ *
+ * Un fallo aqui no puede tumbar el pique: sin reacciones, las filas se pintan
+ * como antes de que existieran. Es un adorno, no el contenido.
+ */
+async function fetchReactions(
+  ctx: DataContext,
+  matchId: string,
+): Promise<Array<{ target_id: string; member_id: string; emoji: string }>> {
+  const { data, error } = await ctx.supabase
+    .from('reactions')
+    .select('target_id, member_id, emoji')
+    .eq('match_id', matchId)
+  if (error || !data) return []
+  return data as unknown as Array<{ target_id: string; member_id: string; emoji: string }>
+}
+
+/**
  * Si el nombre elegido acerto, DEVUELVE QUIEN LO HIZO; `null` si no acerto.
  *
  * Es el espejo en pantalla de `expand_with_subs` (migracion 0026): sigue la
@@ -485,12 +503,25 @@ export async function getMatchPique(matchId: string): Promise<PiqueVM | null> {
   // que se venia a ver.
   const result = resultOrLiveOf(row, ctx.now)
 
-  const [predictions, points, forms, subs] = await Promise.all([
+  const [predictions, points, forms, subs, reactions] = await Promise.all([
     fetchPredictions(ctx, [row.id]),
     fetchPoints(ctx, [row.id]),
     fetchTeamForms(),
     fetchSubstitutions(ctx, row.id),
+    fetchReactions(ctx, row.id),
   ])
+
+  // Agrupadas por a quien van, que es como las pinta la fila.
+  const reaccionesPor = new Map<string, Record<string, number>>()
+  const miasPor = new Map<string, string[]>()
+  for (const r of reactions) {
+    const cuenta = reaccionesPor.get(r.target_id) ?? {}
+    cuenta[r.emoji] = (cuenta[r.emoji] ?? 0) + 1
+    reaccionesPor.set(r.target_id, cuenta)
+    if (r.member_id === ctx.memberId) {
+      miasPor.set(r.target_id, [...(miasPor.get(r.target_id) ?? []), r.emoji])
+    }
+  }
 
   const pointsByMember = new Map(points.map((p) => [p.member_id, p]))
   const memberById = new Map(ctx.members.map((m) => [m.memberId, m]))
@@ -566,6 +597,8 @@ export async function getMatchPique(matchId: string): Promise<PiqueVM | null> {
           points: score?.points ?? 0,
           exact: score?.exact_hit === true,
           signHit: score?.sign_hit === true,
+          reactions: reaccionesPor.get(member.memberId) ?? {},
+          myReactions: miasPor.get(member.memberId) ?? [],
           chips,
         },
       }

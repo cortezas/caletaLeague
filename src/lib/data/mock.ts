@@ -497,6 +497,9 @@ export async function mockGetMatchPique(matchId: string): Promise<PiqueVM | null
         points: breakdown.points,
         exact: breakdown.exact,
         signHit: breakdown.signHit,
+        // En seco no hay reacciones guardadas.
+        reactions: {},
+        myReactions: [],
         chips,
       },
     }

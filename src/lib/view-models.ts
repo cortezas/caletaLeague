@@ -139,6 +139,10 @@ export type PiqueVM = {
     memberId: string; displayName: string; avatarColor: string; avatarUrl: string | null; isMe: boolean
     home: number; away: number; mvp: string | null; scorers: string[]; assists: string[]
     points: number; exact: boolean; signHit: boolean
+    /** Cuantas de cada emoji lleva esta fila. Vacio si no tiene ninguna. */
+    reactions: Record<string, number>
+    /** Las que he puesto YO en esta fila, para pintarlas encendidas. */
+    myReactions: string[]
     chips: Array<{
       kind: PiqueChipKind
       label: string
