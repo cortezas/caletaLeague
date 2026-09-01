@@ -72,7 +72,7 @@ export { getHeadToHead } from './head-to-head'
  * `getTopScorers()` sin argumento devuelve 10 (la ingesta guarda 30).
  */
 export { getCompetitionStandings, getTopScorers } from './competition'
-export { getSeasonDues } from './standings'
+export { getRecords, getSeasonDues } from './standings'
 
 /** Hay backend pero quien pregunta no es miembro: lo lanzan las 9 funciones. */
 export { NoMemberError } from './league'

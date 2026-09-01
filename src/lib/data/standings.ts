@@ -15,7 +15,7 @@
 
 import { duesForGameweek } from '../dues'
 import { scoreLabel } from '../format'
-import type { GameweekStandingsVM, SeasonDuesVM, StandingsVM } from '../view-models'
+import type { GameweekStandingsVM, RecordsVM, SeasonDuesVM, StandingsVM } from '../view-models'
 import {
   effectiveStatus,
   fetchMatchRows,
@@ -321,3 +321,60 @@ export async function getSeasonDues(): Promise<SeasonDuesVM> {
     totalPendiente: rows.reduce((sum, row) => sum + row.pendiente, 0),
   }
 }
+
+/**
+ * Los records de la peña.
+ *
+ * Se agregan en SQL (`public.records_de_la_pena`, migracion 0033) y no aqui:
+ * varios salen de recorrer TODOS los pronosticos de la temporada, y PostgREST
+ * corta a 1000 filas. Con 13 personas y 380 partidos son ~4.900, asi que en
+ * memoria saldrian mal Y EN SILENCIO.
+ *
+ * Un fallo devuelve la lista vacia y la seccion no se pinta: es un adorno, no
+ * puede tumbar la clasificacion.
+ */
+export async function getRecords(): Promise<RecordsVM> {
+  const ctx = await getDataContext()
+  if (!ctx) return { rows: [] }
+
+  const { data, error } = await ctx.supabase.rpc('records_de_la_pena')
+  if (error) return { rows: [] }
+
+  const porId = new Map(ctx.members.map((m) => [m.memberId, m]))
+  type Fila = { clave: string; titulo: string; detalle: string; member_id: string; valor: number }
+
+  const rows = ((data ?? []) as unknown as Fila[])
+    .map((r) => {
+      const quien = porId.get(r.member_id)
+      if (!quien) return null
+      return {
+        clave: r.clave,
+        titulo: r.titulo,
+        detalle: r.detalle,
+        displayName: quien.displayName,
+        avatarColor: quien.avatarColor,
+        avatarUrl: quien.avatarUrl,
+        valor: r.valor,
+      }
+    })
+    .filter((r): r is RecordsVM['rows'][number] => r !== null)
+    // Orden fijo y pensado: primero lo bueno, y las pullas al final, que es
+    // donde mas gracia hacen.
+    .sort((a, b) => ORDEN_RECORDS.indexOf(a.clave) - ORDEN_RECORDS.indexOf(b.clave))
+
+  return { rows }
+}
+
+/** El orden en que se leen. Lo que no este aqui cae al final. */
+const ORDEN_RECORDS = [
+  'mejor_jornada',
+  'exactos',
+  'goleadores',
+  'asistentes',
+  'mvps',
+  'racha',
+  'goleador_loco',
+  'sequia',
+  'peor_jornada',
+  'paganini',
+]

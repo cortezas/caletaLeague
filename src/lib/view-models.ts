@@ -205,6 +205,24 @@ export type SeasonDuesVM = {
   totalPendiente: number
 }
 
+/**
+ * Los records de la peña. Uno por clave; el que no tiene marca no sale.
+ *
+ * La racha del perfil es TUYA y solo la ves tu; esto es lo colectivo, que es lo
+ * que se comenta en el grupo.
+ */
+export type RecordsVM = {
+  rows: Array<{
+    clave: string
+    titulo: string
+    detalle: string
+    displayName: string
+    avatarColor: string
+    avatarUrl: string | null
+    valor: number
+  }>
+}
+
 export type ProfileVM = {
   displayName: string; avatarColor: string; avatarUrl: string | null
   position: number; memberCount: number; leagueName: string

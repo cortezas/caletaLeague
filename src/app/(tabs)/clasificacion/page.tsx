@@ -8,12 +8,14 @@ import { SeasonDues } from '@/features/standings/season-dues'
 import { TopScorers } from '@/features/standings/top-scorers'
 import { HeadToHead } from '@/features/standings/head-to-head'
 import { Podium } from '@/features/standings/podium'
+import { RecordsBoard } from '@/features/standings/records-board'
 import { StandingsRow } from '@/features/standings/standings-row'
 import { requireMember } from '@/lib/auth'
 import {
   getActiveGameweek,
   getCompetitionStandings,
   getHeadToHead,
+  getRecords,
   getSeasonDues,
   getSeasonStandings,
   getTopScorers,
@@ -62,10 +64,13 @@ export default async function ClasificacionPage({
 
   const vista = parseVista((await searchParams).vista)
 
-  const [gameweek, standings, dues, competition, scorers, h2h] = await Promise.all([
+  const [gameweek, standings, dues, records, competition, scorers, h2h] = await Promise.all([
     getActiveGameweek(),
     vista === 'general' ? getSeasonStandings() : null,
     vista === 'general' ? getSeasonDues() : null,
+    // Solo en la vista general, igual que el bote: recorre todos los pronosticos
+    // de la temporada y no tiene por que hacerlo quien viene a ver el cara a cara.
+    vista === 'general' ? getRecords() : null,
     vista === 'laliga' ? getCompetitionStandings() : null,
     vista === 'laliga' ? getTopScorers(20) : null,
     vista === 'cara-a-cara' ? getHeadToHead() : null,
@@ -142,6 +147,7 @@ export default async function ClasificacionPage({
             {/* El bote va aqui y no en una quinta pestaña: el segmentado ya lleva
                 cuatro y en movil no cabe otra. Misma decision que el Pichichi. */}
             {dues && <SeasonDues dues={dues} />}
+            {records && <RecordsBoard records={records} />}
           </div>
         ))}
     </>
