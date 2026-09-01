@@ -1,5 +1,6 @@
 'use client'
 
+import { Sparkles } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useActionState, useEffect, useState } from 'react'
 
@@ -7,7 +8,7 @@ import { Button, Chip, PlayerSelect, useToast } from '@/components/ui'
 import type { ChipTone } from '@/components/ui'
 import { cn } from '@/lib/cn'
 import { TEAM_CODES, TEAMS } from '@/lib/laliga'
-import { samePlayer } from '@/lib/squads'
+import { normalizePlayer, samePlayer } from '@/lib/squads'
 import type { TeamCode } from '@/lib/types'
 import type { AdminMatchVM, TeamVM } from '@/lib/view-models'
 
@@ -131,6 +132,63 @@ export function AdminResultForm({ matches, memberCount }: AdminResultFormProps) 
     setRows((prev) => ({ ...prev, [id]: { ...EMPTY_ROW, ...prev[id], ...change } }))
   }
 
+  /**
+   * El candidato a MVP: el que mas goles + asistencias hizo en el partido.
+   *
+   * ES UNA SUGERENCIA, NO UNA DECISION, y esa distincion es todo lo que hay
+   * aqui. Contrastada contra los 30 MVP que ya estaban puestos a mano, esta
+   * cuenta acierta 15 de 30. La API no da valoraciones de jugador -- comprobado
+   * en /statistics, /lineups, /players y /matches: no existe el campo --, asi
+   * que automatizarlo del todo significaria repartir 2 puntos por una cuenta
+   * que falla la mitad de las veces, y en cuatro de cada diez jornadas
+   * designaria a alguien que la peña no aceptaria: en el Athletic 2-0 Barcelona
+   * el MVP fue Unai Simon, portero del equipo que perdio, y ninguna cuenta de
+   * goles llega ahi.
+   *
+   * Con el gol por delante en el desempate: un 2G vale mas que un 1G+1A.
+   * Empate arriba = no se sugiere nada, que es mas honesto que elegir por orden
+   * alfabetico.
+   */
+  function candidatoMvp(row: Row): string | null {
+    const cuenta = new Map<string, { goles: number; asis: number }>()
+    for (const g of row.scorers) {
+      const k = normalizePlayer(g)
+      if (k === '') continue
+      const v = cuenta.get(k) ?? { goles: 0, asis: 0 }
+      cuenta.set(k, { ...v, goles: v.goles + 1 })
+    }
+    for (const a of row.assists) {
+      const k = normalizePlayer(a)
+      if (k === '') continue
+      const v = cuenta.get(k) ?? { goles: 0, asis: 0 }
+      cuenta.set(k, { ...v, asis: v.asis + 1 })
+    }
+    if (cuenta.size === 0) return null
+
+    const nombrePorClave = new Map<string, string>()
+    for (const n of [...row.scorers, ...row.assists]) {
+      const k = normalizePlayer(n)
+      if (k !== '' && !nombrePorClave.has(k)) nombrePorClave.set(k, n)
+    }
+
+    const orden = [...cuenta.entries()].sort(
+      (a, b) =>
+        b[1].goles + b[1].asis - (a[1].goles + a[1].asis) || b[1].goles - a[1].goles,
+    )
+    const [mejor, segundo] = orden
+    if (segundo) {
+      const puntos = (x: [string, { goles: number; asis: number }]) => [
+        x[1].goles + x[1].asis,
+        x[1].goles,
+      ]
+      const [p1, g1] = puntos(mejor)
+      const [p2, g2] = puntos(segundo)
+      // Empate arriba: mejor no sugerir que sugerir a medias.
+      if (p1 === p2 && g1 === g2) return null
+    }
+    return nombrePorClave.get(mejor[0]) ?? null
+  }
+
   /** Seleccion unica: volver a tocar al elegido lo suelta. */
   function toggleMvp(id: string, name: string) {
     const current = rows[id]?.mvp ?? ''
@@ -233,6 +291,22 @@ export function AdminResultForm({ matches, memberCount }: AdminResultFormProps) 
                   suggestions={match.players}
                   onToggle={(name) => toggleMvp(match.id, name)}
                 />
+                {/* La API no da MVP y deducirlo acierta la mitad de las veces:
+                    se propone y decides tu. Nunca se rellena solo. */}
+                {(() => {
+                  const sugerido = row.mvp === '' ? candidatoMvp(row) : null
+                  if (!sugerido) return null
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => patch(match.id, { mvp: sugerido })}
+                      className="flex min-h-[38px] items-center gap-[7px] self-start rounded-[11px] border border-line2 bg-transparent px-[11px] text-[12.5px] font-bold text-txt2 transition-transform duration-100 active:scale-[.97]"
+                    >
+                      <Sparkles size={14} strokeWidth={2.3} aria-hidden className="text-accent2" />
+                      ¿{sugerido}? · el que más hizo
+                    </button>
+                  )
+                })()}
                 <PlayerSelect
                   label="Goleadores"
                   hint="Uno por gol. Dos veces al mismo = doblete"
