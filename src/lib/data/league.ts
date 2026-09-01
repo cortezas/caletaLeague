@@ -158,6 +158,8 @@ function scoringOf(raw: unknown): Scoring {
     scorer: value('scorer'),
     // Una liga creada antes de 0011 no tiene la clave: cae al defecto (1 punto).
     assist: value('assist'),
+    // Igual con el 0-0: una liga anterior a la 0032 no lo tiene y cae al defecto.
+    goalless: value('goalless'),
     pleno: value('pleno'),
   }
 }

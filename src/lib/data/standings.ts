@@ -285,18 +285,19 @@ export async function getGameweekStandings(n: number): Promise<GameweekStandings
  */
 export async function getSeasonDues(): Promise<SeasonDuesVM> {
   const ctx = await getDataContext()
-  if (!ctx) return { rows: [], total: 0 }
+  if (!ctx) return { rows: [], total: 0, totalPagado: 0, totalPendiente: 0 }
 
-  const { data, error } = await ctx.supabase.rpc('season_dues')
+  // `season_balance` y no `season_dues`: desde la migracion 0032 el organizador
+  // apunta lo que le va pagando la gente, y ensenar la deuda bruta cuando ya se
+  // ha cobrado la mitad seria mentir en la pantalla que habla de dinero.
+  const { data, error } = await ctx.supabase.rpc('season_balance')
   // Un fallo aqui no puede tumbar la clasificacion: se devuelve vacio y la
   // seccion no se pinta. Los puntos, que es lo importante, siguen saliendo.
-  if (error) return { rows: [], total: 0 }
+  if (error) return { rows: [], total: 0, totalPagado: 0, totalPendiente: 0 }
 
-  const euros = new Map(
-    ((data ?? []) as unknown as Array<{ member_id: string; euros: number }>).map((row) => [
-      row.member_id,
-      row.euros,
-    ]),
+  type Saldo = { member_id: string; debido: number; pagado: number; pendiente: number }
+  const saldos = new Map(
+    ((data ?? []) as unknown as Saldo[]).map((row) => [row.member_id, row]),
   )
 
   const rows = ctx.members
@@ -305,11 +306,18 @@ export async function getSeasonDues(): Promise<SeasonDuesVM> {
       displayName: member.displayName,
       avatarColor: member.avatarColor,
       avatarUrl: member.avatarUrl,
-      euros: euros.get(member.memberId) ?? 0,
+      euros: saldos.get(member.memberId)?.debido ?? 0,
+      pagado: saldos.get(member.memberId)?.pagado ?? 0,
+      pendiente: saldos.get(member.memberId)?.pendiente ?? 0,
       isMe: member.memberId === ctx.memberId,
     }))
     // De mas a menos deuda: la lista existe para ver quien va pagando.
     .sort((a, b) => b.euros - a.euros || a.displayName.localeCompare(b.displayName, 'es'))
 
-  return { rows, total: rows.reduce((sum, row) => sum + row.euros, 0) }
+  return {
+    rows,
+    total: rows.reduce((sum, row) => sum + row.euros, 0),
+    totalPagado: rows.reduce((sum, row) => sum + row.pagado, 0),
+    totalPendiente: rows.reduce((sum, row) => sum + row.pendiente, 0),
+  }
 }

@@ -5,6 +5,7 @@ import { notFound, unstable_rethrow } from 'next/navigation'
 
 import { ScreenHeader } from '@/components/ui'
 import { AdminAccessForm } from '@/features/admin/admin-access-form'
+import { AdminMoneyForm } from '@/features/admin/admin-money-form'
 import { AdminKickoffForm } from '@/features/admin/admin-kickoff-form'
 import { AdminResultForm } from '@/features/admin/admin-result-form'
 import { AdminScoringForm } from '@/features/admin/admin-scoring-form'
@@ -12,6 +13,7 @@ import { AdminSquadForm } from '@/features/admin/admin-squad-form'
 import { requireAdmin } from '@/lib/auth'
 import { cn } from '@/lib/cn'
 import { getAccessRows } from '@/lib/data/access'
+import { getMoney } from '@/lib/data/payments'
 import { getAdminMatches, getAdminSquads, getLeagueSettings } from '@/lib/data'
 import { TEAM_CODES, TEAMS } from '@/lib/laliga'
 import type { TeamVM } from '@/lib/view-models'
@@ -28,6 +30,7 @@ const TABS = [
   { key: 'resultados', label: 'Resultados' },
   { key: 'horarios', label: 'Horarios' },
   { key: 'accesos', label: 'Accesos' },
+  { key: 'dinero', label: 'Dinero' },
   { key: 'puntuacion', label: 'Puntuación' },
   { key: 'plantillas', label: 'Plantillas' },
 ] as const
@@ -96,7 +99,9 @@ export default async function AdminPage({
   }
 
   const active: TabKey =
-    tab === 'puntuacion'
+    tab === 'dinero'
+      ? 'dinero'
+      : tab === 'puntuacion'
       ? 'puntuacion'
       : tab === 'plantillas'
         ? 'plantillas'
@@ -108,11 +113,16 @@ export default async function AdminPage({
   // `getAccessRows` solo en su pestaña: lista los correos de toda la peña con la
   // service role key, y eso no tiene por que ejecutarse cada vez que se abre el
   // panel a rellenar un marcador.
-  const [settings, gameweek, squads, accessRows] = await Promise.all([
+  const [settings, gameweek, squads, accessRows, money] = await Promise.all([
     getLeagueSettings(),
     getAdminMatches(jornada),
     getAdminSquads(),
     active === 'accesos' ? getAccessRows() : Promise.resolve([]),
+    // Igual que los accesos: solo en su pestaña. No hay por que consultar el
+    // dinero cada vez que se abre el panel a rellenar un marcador.
+    active === 'dinero'
+      ? getMoney()
+      : Promise.resolve({ rows: [], totales: { debido: 0, pagado: 0, pendiente: 0 }, ultimos: [] }),
   ])
   if (!gameweek) notFound()
 
@@ -245,6 +255,7 @@ export default async function AdminPage({
         <AdminScoringForm scoring={settings.scoring} memberCount={settings.memberCount} />
       )}
       {active === 'accesos' && <AdminAccessForm rows={accessRows} />}
+      {active === 'dinero' && <AdminMoneyForm money={money} />}
       {active === 'plantillas' && <AdminSquadForm teams={TEAM_LIST} squads={squads} />}
     </>
   )

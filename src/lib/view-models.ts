@@ -191,10 +191,18 @@ export type SeasonDuesVM = {
     displayName: string
     avatarColor: string
     avatarUrl: string | null
+    /** Lo que le ha tocado pagar por quedar entre los tres ultimos. */
     euros: number
+    /** Lo que lleva entregado. Lo apunta el organizador (migracion 0032). */
+    pagado: number
+    /** Lo que queda a deber. Nunca negativo. */
+    pendiente: number
     isMe: boolean
   }>
+  /** Lo acumulado por la regla de los tres ultimos. */
   total: number
+  totalPagado: number
+  totalPendiente: number
 }
 
 export type ProfileVM = {

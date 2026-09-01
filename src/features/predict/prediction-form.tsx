@@ -181,6 +181,17 @@ export function PredictionForm({ editor }: PredictionFormProps) {
           >
             {noGoalsLabel}
           </button>
+
+          {/* El 0-0 no se pone nunca porque renuncia a los goleadores y a los
+              asistentes de entrada. Si no se dice que hay premio, el premio no
+              cambia nada: la gracia es que se sepa ANTES de elegir. */}
+          {totalGoles === 0 && (
+            <p className="mt-[9px] text-[11.5px] font-semibold leading-[1.45] text-ok">
+              Un 0-0 clavado paga {scoring.exact + scoring.goalless} puntos: los {scoring.exact} del
+              marcador exacto más {scoring.goalless} de premio, porque aquí no hay goleadores que
+              acertar.
+            </p>
+          )}
         </PlayerSelect>
 
         <PlayerSelect

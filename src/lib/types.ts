@@ -93,6 +93,14 @@ export interface Scoring {
   scorer: number
   /** Por cada asistente acertado. Vale menos que un gol: es mas facil de repartir. */
   assist: number
+  /**
+   * Extra por clavar un 0-0, ADEMAS del exacto.
+   *
+   * Un 0-0 acertado se queda en los puntos del marcador y se acaba ahi: no hay
+   * goleador ni asistente que acertar. Sin este extra, poner un 0-0 es renunciar
+   * de entrada a lo que se llevan los demas, y por eso no lo ponia nadie.
+   */
+  goalless: number
   /** Bonus por acertar el 1X2 de los 10 partidos de la jornada. */
   pleno: number
 }
@@ -103,6 +111,7 @@ export const DEFAULT_SCORING: Scoring = {
   mvp: 2,
   scorer: 2,
   assist: 1,
+  goalless: 3,
   pleno: 5,
 }
 

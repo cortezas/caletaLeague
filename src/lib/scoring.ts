@@ -8,6 +8,9 @@
  *
  * Reglas verificadas contra los datos del prototipo:
  *  - `exact` y `x2` son EXCLUYENTES: un marcador exacto suma 3, no 3 + 1.
+ *  - `goalless` NO es excluyente: un 0-0 clavado suma `exact` + `goalless`. Es un
+ *    premio de consolacion, porque ese pronostico no puede sumar por goleadores
+ *    ni por asistentes -- no los hay.
  *  - cada goleador acertado suma, sin penalizacion por los fallados.
  *  - el bonus de pleno exige el 1X2 correcto en los 10 partidos de la jornada.
  *
@@ -39,6 +42,8 @@ export function sign(home: number, away: number): Sign {
 
 export interface MatchBreakdown {
   exact: boolean
+  /** Clavo un 0-0. Se paga a mayores del exacto. */
+  goalless: boolean
   signHit: boolean
   mvpHit: boolean
   scorersHit: number
@@ -91,6 +96,9 @@ export function scoreMatch(
   scoring: Scoring,
 ): MatchBreakdown {
   const exact = prediction.home === result.home && prediction.away === result.away
+  // El 0-0 clavado. No sustituye al exacto: se suma encima.
+  const goalless =
+    prediction.home === 0 && prediction.away === 0 && result.home === 0 && result.away === 0
   const signHit = sign(prediction.home, prediction.away) === sign(result.home, result.away)
   const mvpHit = samePlayer(prediction.mvp, result.mvp)
 
@@ -100,11 +108,12 @@ export function scoreMatch(
   let points = 0
   if (exact) points += scoring.exact
   else if (signHit) points += scoring.x2
+  if (goalless) points += scoring.goalless
   if (mvpHit) points += scoring.mvp
   points += scorersHit * scoring.scorer
   points += assistsHit * scoring.assist
 
-  return { exact, signHit, mvpHit, scorersHit, assistsHit, points }
+  return { exact, goalless, signHit, mvpHit, scorersHit, assistsHit, points }
 }
 
 export interface GameweekEntry {

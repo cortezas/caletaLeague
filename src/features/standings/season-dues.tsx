@@ -22,13 +22,20 @@ export function SeasonDues({ dues }: { dues: SeasonDuesVM }) {
       <div className="mb-[4px] flex items-baseline justify-between gap-[10px]">
         <h2 className="text-[14.5px] font-extrabold tracking-[-.02em]">Bote</h2>
         <span className="font-num text-[15px] font-extrabold tabular-nums text-bad">
-          {dues.total} €
+          {dues.totalPendiente} €
         </span>
       </div>
 
       <p className="mb-[10px] text-[11.5px] font-semibold leading-[1.45] text-txt3">
         Cada jornada acabada, el último paga {DUES_BY_PLACE[0]} €, el penúltimo {DUES_BY_PLACE[1]} €
         y el antepenúltimo {DUES_BY_PLACE[2]} €. Son {DUES_TOTAL} € por jornada.
+        {dues.totalPagado > 0 && (
+          <>
+            {' '}
+            Van <b className="font-extrabold text-ok">{dues.totalPagado} € pagados</b> de{' '}
+            {dues.total}.
+          </>
+        )}
       </p>
 
       {conDeuda.length === 0 ? (
@@ -54,9 +61,23 @@ export function SeasonDues({ dues }: { dues: SeasonDuesVM }) {
               >
                 {row.displayName}
               </span>
-              <span className="flex-none font-num text-[15px] font-extrabold tabular-nums text-bad">
-                {row.euros} €
-              </span>
+              {/* Lo que queda a deber, no la deuda bruta: es la cifra que le
+                  importa a quien se busca en la lista. Lo ya entregado va al
+                  lado en pequeno, para que nadie tenga que fiarse de memoria. */}
+              {row.pendiente === 0 ? (
+                <span className="flex-none text-[12px] font-extrabold text-ok">Pagado</span>
+              ) : (
+                <span className="flex-none text-right">
+                  <span className="block font-num text-[15px] font-extrabold tabular-nums text-bad">
+                    {row.pendiente} €
+                  </span>
+                  {row.pagado > 0 && (
+                    <span className="block text-[10.5px] font-semibold text-txt3">
+                      pagó {row.pagado}
+                    </span>
+                  )}
+                </span>
+              )}
             </li>
           ))}
         </ul>

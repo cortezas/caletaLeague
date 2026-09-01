@@ -23,6 +23,11 @@ const RULES: Array<{ key: keyof Scoring; label: string; description: string }> =
   { key: 'mvp', label: 'MVP del partido', description: 'El jugador del partido según la peña' },
   { key: 'scorer', label: 'Cada goleador', description: 'Por cada goleador que acierte, sin orden' },
   { key: 'assist', label: 'Cada asistente', description: 'Por cada pase de gol acertado, sin orden' },
+  {
+    key: 'goalless',
+    label: 'Clavar un 0-0',
+    description: 'Extra ADEMÁS del exacto. Sin él nadie pone un 0-0: no puede sumar goleadores',
+  },
   { key: 'pleno', label: 'Pleno al 1X2', description: 'Extra por acertar el signo de los 10 partidos' },
 ]
 
