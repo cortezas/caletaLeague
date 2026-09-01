@@ -94,6 +94,12 @@ export interface SquadSyncReport {
   upserted: number
   /** Filas NO tocadas porque las corrigio el organizador (`source='admin'`). */
   preservedByAdmin: TeamCode[]
+  /**
+   * Jugadores a los que la API ha cambiado el nombre en esta pasada, y cuantas
+   * filas se han reescrito por cada uno. `rows: -1` = el renombrado fallo y hay
+   * que mirarlo: esos puntos estan en el aire.
+   */
+  renamed: Array<{ code: TeamCode; from: string; to: string; rows: number }>
   /** Equipos con menos de 18 jugadores: la API no los tiene completos. */
   shortSquads: ShortSquad[]
   /** Equipos que la API devuelve sin ningun jugador. No se escriben. */
@@ -271,18 +277,23 @@ function isMissingTable(message: string): boolean {
  * en el desplegable solo confunde. Se conserva la PRIMERA grafia y el orden de
  * la API, que viene por posicion (porteros, defensas, medios, delanteros).
  */
-function cleanPlayerNames(squad: FdSquadPlayer[]): string[] {
+function cleanPlayerNames(squad: FdSquadPlayer[]): { names: string[]; ids: number[] } {
   const seen = new Set<string>()
-  const out: string[] = []
+  const names: string[] = []
+  const ids: number[] = []
   for (const player of squad) {
     const name = player.name?.trim()
     if (!name) continue
     const key = normalizePlayer(name)
     if (key === '' || seen.has(key)) continue
     seen.add(key)
-    out.push(name)
+    names.push(name)
+    // El id se guardaba en la basura. Es lo unico estable que da la API: el
+    // nombre lo reescribe cuando quiere, y ese cambio silencioso costo 16
+    // aciertos el 31/08/2026. Con el id, un renombrado es DETECTABLE.
+    ids.push(player.id)
   }
-  return out
+  return { names, ids }
 }
 
 // ---------------------------------------------------------------------------
@@ -293,6 +304,8 @@ interface SquadRow {
   league_id: string
   team_code: TeamCode
   players: string[]
+  /** En el MISMO orden que `players`. Es lo que hace detectable un renombrado. */
+  player_ids: number[]
   source: 'api'
 }
 
@@ -306,6 +319,7 @@ export async function syncSquads(options: SquadSyncOptions = {}): Promise<SquadS
     teamsFetched: 0,
     upserted: 0,
     preservedByAdmin: [],
+    renamed: [],
     shortSquads: [],
     emptySquads: [],
     unknownTeams: [],
@@ -339,7 +353,7 @@ export async function syncSquads(options: SquadSyncOptions = {}): Promise<SquadS
 
     const { data: stored, error: readError } = await admin
       .from('team_squads')
-      .select('team_code, source')
+      .select('team_code, source, players, player_ids')
       .eq('league_id', leagueId)
     if (readError) {
       throw isMissingTable(readError.message)
@@ -351,6 +365,17 @@ export async function syncSquads(options: SquadSyncOptions = {}): Promise<SquadS
       (stored ?? []).filter((row) => row.source === 'admin').map((row) => row.team_code as string),
     )
     const alreadyStored = new Set<string>((stored ?? []).map((row) => row.team_code as string))
+
+    /** Los renombrados que ha hecho la API en esta pasada. */
+    const renombrados: Array<{ code: TeamCode; from: string; to: string }> = []
+
+    /** La grafia con la que se guardo cada jugador la ultima vez, por id. */
+    type Guardado = { players: string[] | null; player_ids: number[] | null }
+    const guardadoPorEquipo = new Map<string, Guardado>()
+    for (const row of stored ?? []) {
+      const r = row as unknown as { team_code: string } & Guardado
+      guardadoPorEquipo.set(r.team_code, { players: r.players, player_ids: r.player_ids })
+    }
 
     // ---- 2. Traduccion y filtrado ------------------------------------------
 
@@ -379,7 +404,7 @@ export async function syncSquads(options: SquadSyncOptions = {}): Promise<SquadS
         continue
       }
 
-      const players = cleanPlayerNames(team.squad ?? [])
+      const { names: players, ids: playerIds } = cleanPlayerNames(team.squad ?? [])
 
       // INVARIANTE 2: una plantilla vacia no borra la que ya hay.
       if (players.length === 0) {
@@ -393,7 +418,32 @@ export async function syncSquads(options: SquadSyncOptions = {}): Promise<SquadS
 
       // `updated_at` no va en el payload: lo pone el default al insertar y el
       // trigger `team_squads_touch_updated_at` (migracion 0008) al actualizar.
-      rows.push({ league_id: leagueId, team_code: code, players, source: 'api' })
+      // ¿Ha renombrado la API a alguien? Mismo id, nombre distinto.
+      //
+      // Esto es para lo que se guarda el id. Sin el, un cambio de grafia es
+      // invisible: la plantilla nueva simplemente deja de casar con lo que la
+      // peña tiene pronosticado, y los puntos se caen sin que salte nada.
+      const antes = guardadoPorEquipo.get(code)
+      if (antes?.player_ids && antes.players) {
+        const nombrePorId = new Map<number, string>()
+        antes.player_ids.forEach((id, i) => {
+          const n = antes.players?.[i]
+          if (typeof n === 'string') nombrePorId.set(id, n)
+        })
+        playerIds.forEach((id, i) => {
+          // `0` es el hueco que dejo el relleno inicial para los nombres que la
+          // API ya no tenia. No identifica a nadie, asi que no puede disparar un
+          // renombrado.
+          if (id <= 0) return
+          const viejo = nombrePorId.get(id)
+          const nuevo = players[i]
+          if (viejo && nuevo && normalizePlayer(viejo) !== normalizePlayer(nuevo)) {
+            renombrados.push({ code, from: viejo, to: nuevo })
+          }
+        })
+      }
+
+      rows.push({ league_id: leagueId, team_code: code, players, player_ids: playerIds, source: 'api' })
     }
 
     // ---- 3. Escritura -------------------------------------------------------
@@ -429,10 +479,11 @@ export async function syncSquads(options: SquadSyncOptions = {}): Promise<SquadS
       report.upserted += inserted?.length ?? 0
     }
 
+    const escritos = new Set<TeamCode>()
     for (const row of updates) {
       const { data: touched, error: updateError } = await admin
         .from('team_squads')
-        .update({ players: row.players })
+        .update({ players: row.players, player_ids: row.player_ids })
         .eq('league_id', row.league_id)
         .eq('team_code', row.team_code)
         // INVARIANTE 1, esta vez evaluado por Postgres y no por memoria.
@@ -441,11 +492,39 @@ export async function syncSquads(options: SquadSyncOptions = {}): Promise<SquadS
       if (updateError) failWrite(updateError.message)
       if ((touched?.length ?? 0) > 0) {
         report.upserted += 1
+        escritos.add(row.team_code)
       } else {
         // La fila paso a 'admin' entre la lectura y este update: el organizador
         // gano la carrera, que es exactamente lo que tiene que pasar.
         report.preservedByAdmin.push(row.team_code)
       }
+    }
+
+    // ---- 4. Los renombrados ------------------------------------------------
+    //
+    // DESPUES de escribir la plantilla y SOLO de los equipos cuya fila se ha
+    // escrito de verdad: si el organizador gano la carrera, su grafia manda y no
+    // hay nada que renombrar.
+    //
+    // Esto es lo que evita que un cambio de nombre de football-data se lleve por
+    // delante los aciertos de la peña. `prediction_points` y `standings` son
+    // vistas que se recalculan desde los nombres de hoy, asi que sin este paso un
+    // renombrado no cuesta una jornada: reescribe la temporada hacia atras.
+    for (const cambio of renombrados) {
+      if (!escritos.has(cambio.code)) continue
+      const { data: tocadas, error: renameError } = await admin.rpc('renombrar_jugador', {
+        p_team_code: cambio.code,
+        p_viejo: cambio.from,
+        p_nuevo: cambio.to,
+      })
+      // Un fallo aqui no puede tumbar la sincronizacion: la plantilla ya esta
+      // escrita y lo importante es que quede constancia para mirarlo.
+      report.renamed.push({
+        code: cambio.code,
+        from: cambio.from,
+        to: cambio.to,
+        rows: renameError ? -1 : ((tocadas as number | null) ?? 0),
+      })
     }
 
     if (report.shortSquads.length > 0) {
