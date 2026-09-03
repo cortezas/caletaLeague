@@ -5,7 +5,8 @@ import { useActionState, useEffect } from 'react'
 import { useToast } from '@/components/ui'
 import { cn } from '@/lib/cn'
 
-import { EMOJIS, toggleReactionAction, type ReactionState } from './reaction-actions'
+import { EMOJIS } from './emojis'
+import { toggleReactionAction, type ReactionState } from './reaction-actions'
 
 const INITIAL: ReactionState = { ok: false, error: null }
 

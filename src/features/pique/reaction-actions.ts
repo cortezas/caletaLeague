@@ -17,10 +17,9 @@ import { revalidatePath } from 'next/cache'
 import { requireMember } from '@/lib/auth'
 import { createClient, isSupabaseConfigured } from '@/lib/supabase/server'
 
-export type ReactionState = { ok: boolean; error: string | null }
+import { EMOJIS } from './emojis'
 
-/** La misma lista cerrada que el CHECK de la tabla. Si cambia una, cambia la otra. */
-export const EMOJIS = ['🔥', '💀', '🤡', '👏', '😂', '🧠'] as const
+export type ReactionState = { ok: boolean; error: string | null }
 
 const INVALIDO = 'Ese emoji no vale.'
 
