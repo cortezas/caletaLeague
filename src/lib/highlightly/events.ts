@@ -82,6 +82,8 @@ export interface NameResolution {
     | 'una-palabra'
     | 'prefijo'
     | 'contenido'
+    | 'apellido-y-pila'
+    | 'alias'
     | 'ambiguous'
     | 'no-squad'
     | 'no-match'
@@ -121,6 +123,52 @@ function surnameVariants(normalized: string): string[] {
 function surnameTokens(normalized: string): string[] {
   const tokens = normalized.split(' ').filter(Boolean)
   return tokens.length <= 1 ? tokens : tokens.slice(1)
+}
+
+/**
+ * Nombre LEGAL de Highlightly -> como lo escribe la plantilla de football-data.
+ *
+ * El ultimo recurso, y a mano porque no hay otra. Los dos proveedores dan ids de
+ * jugador, pero cada uno los suyos y sin ningun campo comun, asi que cuando un
+ * jugador se conoce por un apodo que no comparte NI UNA PALABRA con su nombre
+ * del registro no queda ninguna regla que los una:
+ *
+ *   Highlightly "Raphael Dias Belloli"        plantilla "Raphinha"
+ *   Highlightly "Rodrigo Hernandez Cascante"  plantilla "Rodri"
+ *
+ * Lo de Raphinha no es teorico: el 06/09/2026 su gol en el Valencia-Barcelona se
+ * guardo con el nombre largo y trece personas que lo habian puesto cobraron
+ * cero. La escalera entera no puede llegar ahi -- "raphael" y "raphinha" solo
+ * comparten cuatro letras de prefijo, y casar por eso metería a Marc con Marco.
+ *
+ * MANTENIMIENTO: cuando el informe de la ingesta (`unmatchedNames`) saque un
+ * nombre largo de alguien conocido por su apodo, la linea va aqui. La clave se
+ * compara normalizada, asi que da igual como se escriban los acentos.
+ */
+const ALIAS_APODO: Record<string, string> = {
+  'raphael dias belloli': 'Raphinha',
+  'rodrigo hernandez cascante': 'Rodri',
+}
+
+/**
+ * Particulas que NO identifican a nadie. Un apellido compartido solo vale si es
+ * un apellido de verdad: "de", "van" o "dos" los lleva media liga.
+ */
+const PARTICULAS = new Set([
+  'de', 'del', 'la', 'las', 'los', 'da', 'das', 'do', 'dos', 'di', 'le',
+  'van', 'von', 'der', 'den', 'el', 'al', 'bin', 'ben', 'mac', 'san',
+])
+
+/** Nombre de pila (primera palabra) de un nombre normalizado. */
+function givenName(normalized: string): string {
+  return normalized.split(' ').filter(Boolean)[0] ?? ''
+}
+
+/** Longitud del prefijo comun de dos cadenas. */
+function commonPrefix(a: string, b: string): number {
+  let i = 0
+  while (i < a.length && i < b.length && a[i] === b[i]) i += 1
+  return i
 }
 
 /** Las palabras de un nombre, ordenadas, para comparar sin importar el orden. */
@@ -168,7 +216,10 @@ function splitAbbreviated(normalized: string): { initial: string; surname: strin
  *   5. las mismas palabras en otro orden ("Cruz Luismi" / "Luismi Cruz");
  *   6. abreviado contra un jugador de una sola palabra ("I. Romero" / "Isaac");
  *   7. apodo recortado ("Chupe" / "Chupete");
- *   8. un nombre contenido en el otro ("Marc Bartra" / "Bartra").
+ *   8. un nombre contenido en el otro ("Marc Bartra" / "Bartra");
+ *   9. un apellido compartido con el nombre de pila compatible
+ *      ("Daniel Olmo Carvajal" / "Dani Olmo");
+ *  10. la tabla de apodos `ALIAS_APODO` ("Raphael Dias Belloli" / "Raphinha").
  *
  * Los escalones 5, 6 y 7 se anadieron el 25/08/2026 despues de encontrar OCHO
  * nombres guardados en crudo en cinco partidos ya jugados. Un nombre sin resolver
@@ -348,6 +399,62 @@ export function resolvePlayerName(raw: string, squad: string[]): NameResolution 
       matched: false,
       reason: 'ambiguous',
       candidates: contenido.map((h) => h.name),
+    }
+  }
+
+  // 9. Un apellido COMPARTIDO con el nombre de pila COMPATIBLE.
+  //    Los dos proveedores escriben el mismo jugador con distinto numero de
+  //    apellidos y con el nombre de pila recortado por sitios distintos:
+  //      Highlightly "Daniel Olmo Carvajal"    plantilla "Dani Olmo"
+  //      Highlightly "Robert Navarro Munoz"    plantilla "Roberto Navarro"
+  //      Highlightly "Pablo Ibanez Lumbreras"  plantilla "Pablo Ibanez Tebar"
+  //      Highlightly "Santi Comesana"          plantilla "Santiago Comesana"
+  //    El escalon 8 no llega a ninguno: exige que las palabras de un lado sean
+  //    todas del otro, y "dani" no es "daniel".
+  //
+  //    LAS DOS CONDICIONES SON OBLIGATORIAS, y la del nombre de pila no es un
+  //    adorno. Con solo el apellido, "Pablo Garcia" del Betis casaba con
+  //    "Francisco Garcia" y "Alex Marchal Garcia" con "Kike Garcia": mismo
+  //    apellido, otra persona. Se exige tres letras de prefijo comun en el
+  //    nombre de pila, que es lo que separa dani/daniel de pablo/francisco.
+  //
+  //    Y candidato UNICO, como en todos los demas: dos "Rodriguez" en el Alaves
+  //    se quedan sin resolver, que es lo correcto.
+  const apellidosPropios = (n: string): string[] =>
+    surnameTokens(n).filter((t) => t.length >= 4 && !PARTICULAS.has(t))
+  const mios = apellidosPropios(norm)
+  if (mios.length > 0 && norm.includes(' ')) {
+    const pila = givenName(norm)
+    const porApellido = entries.filter((entry) => {
+      if (!entry.norm.includes(' ')) return false
+      if (!apellidosPropios(entry.norm).some((t) => mios.includes(t))) return false
+      return commonPrefix(pila, givenName(entry.norm)) >= 3
+    })
+    if (porApellido.length === 1) {
+      return { input, resolved: porApellido[0].name, matched: true, reason: 'apellido-y-pila' }
+    }
+    if (porApellido.length > 1) {
+      return {
+        input,
+        resolved: input,
+        matched: false,
+        reason: 'ambiguous',
+        candidates: porApellido.map((h) => h.name),
+      }
+    }
+  }
+
+  // 10. La tabla de apodos, cuando no queda ninguna regla que valga.
+  //     Va la ULTIMA a proposito: asi no puede tapar a un escalon que habria
+  //     acertado solo, y se sigue exigiendo que el jugador este en ESTA
+  //     plantilla -- una entrada de la tabla no vale para casar a un jugador
+  //     que no juega este partido.
+  const apodo = ALIAS_APODO[norm]
+  if (apodo !== undefined) {
+    const objetivo = normalizePlayer(apodo)
+    const porApodo = entries.find((entry) => entry.norm === objetivo)
+    if (porApodo) {
+      return { input, resolved: porApodo.name, matched: true, reason: 'alias' }
     }
   }
 
