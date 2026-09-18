@@ -636,6 +636,7 @@ export interface MatchOutcome {
     | 'no-goals-closed'
     | 'events-empty'
     | 'too-many-goals'
+    | 'goles-incompletos'
     | 'preserved-by-admin'
     | 'failed'
   scorers: string[]
@@ -1253,6 +1254,38 @@ export async function syncMatchEvents(options: EventsSyncOptions = {}): Promise<
       }
 
       // ---- 6. Escritura ----------------------------------------------------
+
+      // SI LA API EXPLICA MENOS GOLES QUE EL MARCADOR, NO SE CIERRA TODAVIA.
+      //
+      // Escribir sella el partido con `source='api'` y la INVARIANTE 4 dice que
+      // un partido sellado no se vuelve a consultar jamas. Con datos a medias eso
+      // convierte un retraso del proveedor en un agujero permanente: el
+      // Barcelona-Racing de la jornada 6 se ingirio 3 horas despues del pitido
+      // con 5 goleadores para un 7-2, se sello, y once personas se quedaron sin
+      // el gol de Lamine Yamal hasta que se reviso a mano.
+      //
+      // Los goles en propia ya estan descontados de `goalsToExplain`, asi que lo
+      // que falta aqui es dato que la API todavia no ha publicado. Se reintenta
+      // en las siguientes pasadas, que son horarias, y a las 12 horas se da por
+      // perdido y se escribe lo que haya: si no ha llegado para entonces no va a
+      // llegar, y seguir preguntando gasta peticiones de las 100 del dia.
+      const horasDesdePitido = (Date.now() - Date.parse(local.kickoffAt)) / 3_600_000
+      if (extraction.goals.length < goalsToExplain && horasDesdePitido < 12) {
+        outcomes.push({
+          matchId: local.id,
+          pairing,
+          apiId: pair.api.apiId,
+          status: 'goles-incompletos',
+          scorers: extraction.goals.map((g) => g.scorer),
+          assists: [],
+          realScore,
+          unmatchedNames: [],
+          note:
+            `la API solo explica ${extraction.goals.length} de ${goalsToExplain} gol(es). ` +
+            'No se escribe para no sellar el partido a medias; se reintenta en la siguiente pasada.',
+        })
+        continue
+      }
 
       const written = await writePlayers(admin, local.id, scorers, assists)
       const note: string[] = []

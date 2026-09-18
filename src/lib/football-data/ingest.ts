@@ -680,7 +680,18 @@ export async function syncMatches(options: SyncOptions = {}): Promise<SyncReport
     let realHome = stored?.real_home ?? null
     let realAway = stored?.real_away ?? null
 
-    if (candidate.score) {
+    // EL MARCADOR SOLO SE COPIA DE UN PARTIDO QUE SE HA JUGADO.
+    //
+    // football-data rellena `score.fullTime` con 0-0 en los partidos APLAZADOS,
+    // y sin este filtro ese relleno entraba como resultado real. Paso con el
+    // Levante-Athletic de la jornada 6: aplazado, guardado como 0-0, y la app
+    // repartiendo puntos por el signo de un partido que no se ha jugado. Peor
+    // aun con la regla del 0-0 clavado, que son 3 puntos de premio.
+    //
+    // `mapStatus` ya devolvia 'locked' para POSTPONED, asi que el estado estaba
+    // bien; lo que no estaba era el marcador, que se escribia igualmente.
+    const jugado = status === 'played' || status === 'live'
+    if (candidate.score && jugado) {
       if (realHome !== candidate.score.home || realAway !== candidate.score.away) resultsWritten += 1
       realHome = candidate.score.home
       realAway = candidate.score.away
