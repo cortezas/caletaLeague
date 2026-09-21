@@ -69,6 +69,14 @@ export type MemberInfo = {
   userId: string
   displayName: string
   avatarColor: string; avatarUrl: string | null
+  /**
+   * Primera jornada que este miembro ya NO juega. `null` = sigue jugando.
+   *
+   * Quien se va de la peña a mitad de temporada no se borra: conserva sus
+   * puntos y su deuda, pero deja de salir en las jornadas siguientes y deja de
+   * entrar en el reparto de euros. Ver `jugoLaJornada` y la migracion 0038.
+   */
+  bajaDesdeJornada: number | null
 }
 
 export type DataContext = {
@@ -107,7 +115,13 @@ type MemberRow = {
   display_name: string
   avatar_color: string
   avatar_url: string | null
+  baja_desde_jornada: number | null
   leagues: LeagueEmbed
+}
+
+/** ¿Este miembro jugaba la jornada `numero`? */
+export function jugoLaJornada(member: MemberInfo, numero: number): boolean {
+  return member.bajaDesdeJornada === null || numero < member.bajaDesdeJornada
 }
 
 /**
@@ -185,7 +199,7 @@ export const getDataContext = cache(async (): Promise<DataContext | null> => {
     .from('members')
     .select(
       'id, user_id, league_id, display_name, avatar_color, avatar_url, ' +
-        'leagues!inner(id, name, invite_code, scoring, admin_user_id)',
+        'baja_desde_jornada, leagues!inner(id, name, invite_code, scoring, admin_user_id)',
     )
     .order('joined_at', { ascending: true })
   if (error) throw error
@@ -216,6 +230,7 @@ export const getDataContext = cache(async (): Promise<DataContext | null> => {
         displayName: row.display_name,
         avatarColor: row.avatar_color,
       avatarUrl: row.avatar_url,
+        bajaDesdeJornada: row.baja_desde_jornada,
       })),
     now: Date.now(),
   }

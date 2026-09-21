@@ -70,8 +70,10 @@ async function tallyFromSupabase(ctx: DataContext): Promise<Row[]> {
   const rows = (data ?? []) as unknown as GameweekPointsRow[]
 
   // member -> jornada -> puntos. `gameweek_points` emite una fila por miembro y
-  // jornada aunque no haya pronosticado (total 0), asi que las dos partes de
-  // cada comparacion existen siempre.
+  // jornada aunque no haya pronosticado (total 0). La UNICA ausencia posible es
+  // la de quien ya se habia ido de la peña (migracion 0038), y por eso `compare`
+  // salta las jornadas en las que a uno de los dos le falta la fila: un cero de
+  // verdad y un "no estaba" no se pueden cobrar igual.
   const byMember = new Map<string, Map<string, number>>()
   for (const row of rows) {
     const bucket = byMember.get(row.member_id) ?? new Map<string, number>()
@@ -132,8 +134,11 @@ function compare(
   let pointsAgainst = 0
 
   for (const id of gameweekIds) {
-    const me = mine.get(id) ?? 0
-    const other = theirs.get(id) ?? 0
+    const me = mine.get(id)
+    const other = theirs.get(id)
+    // Sin fila de uno de los dos no hay duelo que contar: o yo no estaba o no
+    // estaba el. Se salta, no se cuenta como derrota de nadie.
+    if (me === undefined || other === undefined) continue
     pointsFor += me
     pointsAgainst += other
     if (me > other) wins += 1

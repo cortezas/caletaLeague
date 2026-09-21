@@ -22,6 +22,7 @@ import {
   getDataContext,
   getLeagueGameweeks,
   getPlayedGameweekIds,
+  jugoLaJornada,
   matchLabel,
   resultOf,
 } from './league'
@@ -211,9 +212,15 @@ export async function getGameweekStandings(n: number): Promise<GameweekStandings
     if (row.sign_hit === true) signHits.set(row.member_id, (signHits.get(row.member_id) ?? 0) + 1)
   }
 
+  // Quien se fue de la peña no sale en las jornadas posteriores a su baja: ni en
+  // la tabla ni, sobre todo, en el reparto de euros. Dejarlo seria cobrarle 3
+  // euros por cada jornada que no juega y, peor, sacar de los puestos de pago a
+  // quien si jugo y quedo el ultimo de verdad. Lo anterior a su baja no se toca.
+  const enJuego = ctx.members.filter((member) => jugoLaJornada(member, n))
+
   const dues = complete
     ? duesForGameweek(
-        ctx.members.map((member) => ({
+        enJuego.map((member) => ({
           memberId: member.memberId,
           points: totalByMember.get(member.memberId) ?? 0,
           predictionsMade: predictionsMade.get(member.memberId) ?? 0,
@@ -222,7 +229,7 @@ export async function getGameweekStandings(n: number): Promise<GameweekStandings
       )
     : new Map<string, number>()
 
-  const ordered = [...ctx.members].sort(
+  const ordered = [...enJuego].sort(
     (a, b) => (totalByMember.get(b.memberId) ?? 0) - (totalByMember.get(a.memberId) ?? 0),
   )
   const positions = rankBy(ordered.map((member) => totalByMember.get(member.memberId) ?? 0))
