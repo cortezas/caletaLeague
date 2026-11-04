@@ -763,6 +763,24 @@ const DEFAULT_MAX_REQUESTS = 40
 const DEFAULT_SINCE_DAYS = 8
 
 /**
+ * Cuando se juega DE VERDAD un partido.
+ *
+ * `kickoff_at` no basta: un partido aplazado conserva la hora original, porque
+ * una hora pasada no se reescribe jamas (migracion 0017), y el dia real solo
+ * esta en `kickoff_api_at`. Con la original, el Levante-Athletic jugado el
+ * 21/10 tenia fecha 16/09: quedaba fuera de la ventana de 8 dias y, de entrar, se
+ * habria buscado en la API el dia equivocado.
+ *
+ * Se toma la MAS TARDIA de las dos. Si el organizador movio el partido a mano y la
+ * API aun da la hora vieja, manda la suya; si es la API la que sabe la nueva, manda
+ * esa.
+ */
+function effectiveKickoff(kickoffAt: string, kickoffApiAt: string | null): string {
+  if (!kickoffApiAt) return kickoffAt
+  return Date.parse(kickoffApiAt) > Date.parse(kickoffAt) ? kickoffApiAt : kickoffAt
+}
+
+/**
  * Guarda los cambios de un partido. PASO 1 del "Sustituto +" (migracion 0025).
  *
  * No cambia nada de lo que ya hay. Se guarda nuestra interpretacion de los dos
@@ -1008,13 +1026,15 @@ export async function syncMatchEvents(options: EventsSyncOptions = {}): Promise<
 
     const { data: rows, error: matchError } = await admin
       .from('matches')
-      .select('id, home_code, away_code, kickoff_at, real_home, real_away, real_scorers, real_assists, real_players_source')
+      .select('id, home_code, away_code, kickoff_at, kickoff_api_at, real_home, real_away, real_scorers, real_assists, real_players_source')
       .in('gameweek_id', gameweekIds)
       .eq('status', 'played')
       // INVARIANTE 4: un partido que ya resolvio la API no se vuelve a consultar
       // JAMAS, ni aunque acabara 0-0 y las dos listas esten vacias.
       .neq('real_players_source', 'api')
-      .gte('kickoff_at', since)
+      // Dentro de la ventana si CUALQUIERA de las dos horas lo esta: la mas tardia
+      // (`effectiveKickoff`) es la que manda, y un aplazado tiene la original vieja.
+      .or(`kickoff_at.gte.${since},kickoff_api_at.gte.${since}`)
       .order('kickoff_at', { ascending: true })
     if (matchError) {
       throw isMissingSourceColumn(matchError.message)
@@ -1052,7 +1072,7 @@ export async function syncMatchEvents(options: EventsSyncOptions = {}): Promise<
         id: row.id as string,
         homeCode: row.home_code as TeamCode,
         awayCode: row.away_code as TeamCode,
-        kickoffAt: row.kickoff_at as string,
+        kickoffAt: effectiveKickoff(row.kickoff_at as string, (row.kickoff_api_at as string | null) ?? null),
         realHome: row.real_home,
         realAway: row.real_away,
       })
